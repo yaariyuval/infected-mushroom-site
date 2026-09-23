@@ -580,7 +580,7 @@ function makeTalons(side: 1 | -1, scale: number, n: number, seed: number, eyes: 
     const pts = [
       [-1.0, 0.25, -0.9], [-1.1, 0.2, 0.0], [-0.7, 0.05, 0.72],
       [0.0, -0.15, 0.92], [0.65 * reach, -0.45, 0.78], [1.05 * reach, -0.72, 0.55],
-    ].map(([u, yy, z]) => new THREE.Vector3(-side * (RING_R - u * scale), y + yy * scale, z * (0.9 + 0.1 * scale)));
+    ].map(([u, yy, z]) => new THREE.Vector3(side * (RING_R - u * scale), y + yy * scale, z * (0.9 + 0.1 * scale)));
     const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
     const profile = (t: number) => {
       const beak = 1 - 0.45 * smooth(0.35, 1, t);
@@ -810,7 +810,6 @@ function makeForest() {
   const rand = rng(909);
   const group = new THREE.Group();
   const time = { value: 0 };
-  const stemMat = new THREE.MeshStandardMaterial({ color: 0xcfc4f4, roughness: 0.75, emissive: 0x3a3070 });
   const capMat = new THREE.MeshStandardMaterial({ color: 0xc03a8c, roughness: 0.55, emissive: 0x30062a });
   capMat.onBeforeCompile = (sh) => {
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vObj;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvObj = position;');
@@ -825,27 +824,34 @@ function makeForest() {
           totalEmissiveRadiance += vec3(.2, .85, 1.1) * rimLine;
         }`);
   };
-  const coneMat = new THREE.ShaderMaterial({
-    uniforms: { uT: time },
-    vertexShader: `varying vec2 vUv; varying vec3 vObj; void main(){ vUv = uv; vObj = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
-    fragmentShader: `uniform float uT; varying vec2 vUv; varying vec3 vObj;
-      ${NOISE_GLSL}
-      void main() {
-        // rows of almond spots around the cone, staggered like scales
-        vec2 q = vec2(vUv.x * 11., vUv.y * 4.2);
-        q.x += step(1., mod(floor(q.y), 2.)) * .5;
-        vec2 id = floor(q), f = fract(q) - .5;
-        float h = h21(id + 7.);
-        vec2 e = f / vec2(.2, .38);
-        float leaf = smoothstep(1., .75, length(e) + abs(e.x) * .5);
-        float on = step(.18, h) * smoothstep(.02, .15, vUv.y) * smoothstep(1., .85, vUv.y);
-        float tw = .75 + .25 * sin(uT * 1.6 + h * 30.);
-        vec3 base = vec3(.09, .05, .26) * (.45 + .55 * vUv.y);
-        vec3 col = mix(base, vec3(.25, 1.05, 1.2) * tw, leaf * on);
-        gl_FragColor = vec4(col, 1.);
-      }`,
-  });
-
+  // One flared stalk: slim at the ground, swelling like a tree trunk into the cap, with blue almond
+  // spots glowing from inside the upper stalk (soft halo, bright core), twinkling slowly.
+  const stalkMat = new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x000000 });
+  stalkMat.onBeforeCompile = (sh) => {
+    sh.uniforms.uT = time;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vSt;')
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvSt = uv;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>\nuniform float uT; varying vec2 vSt;\n${NOISE_GLSL}`)
+      .replace('#include <envmap_fragment>', '')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        diffuseColor.rgb = mix(vec3(.28, .1, .42), vec3(.62, .34, .8), smoothstep(0., .7, vSt.y));
+        diffuseColor.rgb *= .85 + .3 * n2(vSt * vec2(40., 12.));`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        {
+          vec2 q = vec2(vSt.x * 9., vSt.y * 9.);
+          q.x += step(1., mod(floor(q.y), 2.)) * .5;
+          vec2 id = floor(q), f = fract(q) - .5;
+          float h = h21(id + 3.);
+          vec2 e = f / vec2(.17, .34);
+          float d = length(e) + abs(e.x) * .6;
+          float core = smoothstep(1., .7, d), halo = smoothstep(2.2, .6, d);
+          float on = step(.25, h) * smoothstep(.45, .7, vSt.y) * smoothstep(1., .93, vSt.y);
+          float tw = .7 + .3 * sin(uT * 1.4 + h * 40.);
+          totalEmissiveRadiance += vec3(.15, .85, 1.05) * on * tw * (core * 1.1 + halo * .25) + diffuseColor.rgb * .28;
+        }`);
+  };
   const places = [
     [-7.5, -4], [-11, -9], [-5.5, -12], [7.8, -4.5], [11.5, -9], [5.5, -13], [-15, -3], [15, -2.5], [0, -16], [-9, 1.5], [9.5, 2],
   ];
@@ -855,20 +861,19 @@ function makeForest() {
   );
   for (const [x, z] of places) {
     const t = new THREE.Group();
-    const h = lerp(2.6, 5, rand()), cr = lerp(1.2, 2.0, rand());
-    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.11 * cr, 0.17 * cr, h, 14), stemMat);
-    stem.position.y = h / 2;
-    t.add(stem);
+    const h = lerp(3, 5.5, rand()), cr = lerp(1.2, 2.0, rand());
+    const prof: THREE.Vector2[] = [];
+    for (let k = 0; k <= 24; k++) {
+      const u = k / 24;
+      const r = cr * (0.1 + 0.02 * (1 - u) + 0.72 * Math.pow(u, 3.2));
+      prof.push(new THREE.Vector2(r, u * h));
+    }
+    const stalk = new THREE.Mesh(new THREE.LatheGeometry(prof, 40), stalkMat);
+    t.add(stalk);
     const cap = new THREE.Mesh(capGeo, capMat);
-    cap.scale.set(cr, cr * 0.9, cr);
+    cap.scale.set(cr * 1.05, cr * 0.7, cr * 1.05);
     cap.position.y = h;
     t.add(cap);
-    const coneH = cr * lerp(0.4, 0.55, rand());
-    const coneGeo = new THREE.CylinderGeometry(cr * 0.9, 0.2 * cr, coneH, 40, 1, true);
-    coneGeo.translate(0, -coneH / 2, 0);
-    const cone = new THREE.Mesh(coneGeo, coneMat);
-    cone.position.y = h - 0.02;
-    t.add(cone);
     t.position.set(x, 0, z);
     t.rotation.y = rand() * 6;
     group.add(t);
@@ -964,7 +969,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   rig.add(roots.group);
 
   const eyes: Eye[] = [];
-  const left = makeTalons(-1, 0.9, 4, 3, eyes, 0.3, 1.45);
+  const left = makeTalons(-1, 1.15, 4, 3, eyes, 0.3, 1.45);
   const right = makeFist(1.0, 8, eyes);
   rig.add(left.group, right.group);
 
