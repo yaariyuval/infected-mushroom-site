@@ -25,7 +25,7 @@
   }
 
   function boot() {
-    import('../scripts/grove')
+    import('../scripts/im30')
       .then(({ start }) => {
         const handle = start(canvas, { still, onFirstFrame: () => hero.classList.add('is-lit') });
         canvas.addEventListener('webglcontextlost', (e) => {
