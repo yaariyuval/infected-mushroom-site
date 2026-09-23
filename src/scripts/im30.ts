@@ -519,17 +519,38 @@ function makeFinger(curve: THREE.CatmullRomCurve3, R: number, skin: THREE.Materi
   return new THREE.Mesh(geo, skin);
 }
 
-// Place an almond eye flat on a finger's surface at curve position t, facing `toward`.
-function eyeOnFinger(curve: THREE.CatmullRomCurve3, t: number, r: number, toward: THREE.Vector3, size: number, eyes: Eye[], rand: () => number, lid = 0, tilt = 0) {
-  const pos = curve.getPointAt(t), tan = curve.getTangentAt(t);
-  if (tan.x > 0) tan.negate(); // keep the eye's long axis reading left-to-right consistently
-  const out = toward.clone().addScaledVector(tan, -tan.dot(toward)).normalize();
-  const bi = new THREE.Vector3().crossVectors(out, tan).normalize();
-  const e = makeEyeDecal(r * 2.4 * size, r * 1.2 * size, eyes, rand, lid);
-  e.position.copy(pos).addScaledVector(out, r * 1.1);
-  e.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(tan.clone().negate(), bi.negate(), out));
-  e.rotateZ(tilt);
-  return e;
+// An almond eye wrapped onto the finger's surface around curve position t, facing `toward`,
+// so it hugs the skin instead of floating as a flat sticker.
+function eyeOnFinger(curve: THREE.CatmullRomCurve3, t: number, R: number, profile: (t: number) => number, toward: THREE.Vector3, size: number, eyes: Eye[], rand: () => number, lid = 0, tilt = 0) {
+  const len = curve.getLength();
+  const r0 = R * profile(t);
+  const w = r0 * 2.4 * size, h = Math.min(r0 * 1.2 * size, r0 * 1.7);
+  const geo = new THREE.PlaneGeometry(w, h, 16, 8);
+  const p = geo.attributes.position as THREE.BufferAttribute;
+  const P = new THREE.Vector3(), T = new THREE.Vector3(), out = new THREE.Vector3(), bi = new THREE.Vector3();
+  // decide once which way along the finger is the eye's "right", so it isn't mirrored
+  const T0 = curve.getTangentAt(t);
+  const dir = T0.x > 0 ? -1 : 1;
+  for (let i = 0; i < p.count; i++) {
+    const u = p.getX(i), v = p.getY(i);
+    const ct = THREE.MathUtils.clamp(t + (dir * u) / len, 0, 1);
+    curve.getPointAt(ct, P);
+    curve.getTangentAt(ct, T);
+    out.copy(toward).addScaledVector(T, -T.dot(toward)).normalize();
+    bi.crossVectors(T, out).normalize();
+    if (bi.y < 0) bi.negate();
+    const r = R * profile(ct) * 1.03;
+    const th = v / r + tilt * (u / w);
+    P.addScaledVector(out, Math.cos(th) * r).addScaledVector(bi, Math.sin(th) * r);
+    p.setXYZ(i, P.x, P.y, P.z);
+  }
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uLook: { value: new THREE.Vector2() }, uBlink: { value: lid } },
+    vertexShader: EYE_VERT, fragmentShader: EYE_FRAG,
+    transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, side: THREE.DoubleSide,
+  });
+  eyes.push({ mat, phase: rand() * 10, lid });
+  return new THREE.Mesh(geo, mat);
 }
 
 function skinMaterial() {
@@ -567,7 +588,7 @@ function makeTalons(side: 1 | -1, scale: number, n: number, seed: number, eyes: 
     };
     const g = new THREE.Group();
     g.add(makeFinger(curve, R, skin, profile, [0.56, 0.74]));
-    g.add(eyeOnFinger(curve, lerp(0.38, 0.44, rand()), R * profile(0.42), toward, eyeSize, eyes, rand, lid));
+    g.add(eyeOnFinger(curve, lerp(0.38, 0.44, rand()), R, profile, toward, eyeSize, eyes, rand, lid));
     group.add(g);
     if (i === n - 1) lowest = { curve, g, R };
     flex.push({ g, phase: rand() * 6, amp: 0.05 });
@@ -633,9 +654,9 @@ function makeFist(scale: number, seed: number, eyes: Eye[]) {
     const g = new THREE.Group();
     g.add(makeFinger(curve, R, skin, profile, [0.93, 1.0]));
     // a big eye near the fingertip on most fingers, smaller ones back on the knuckles
-    if (i !== 1) g.add(eyeOnFinger(curve, lerp(0.8, 0.86, rand()), R * profile(0.83), toward, lerp(1.15, 1.45, rand()), eyes, rand, rand() > 0.6 ? 0.25 : 0, (rand() - 0.5) * 0.5));
-    if (i === 1 || i === 2) g.add(eyeOnFinger(curve, lerp(0.5, 0.56, rand()), R * profile(0.53), toward, lerp(1.2, 1.4, rand()), eyes, rand, 0, (rand() - 0.5) * 0.3));
-    if (i === 0 || i === 3) g.add(eyeOnFinger(curve, lerp(0.3, 0.36, rand()), R * profile(0.33), toward, lerp(0.8, 1.0, rand()), eyes, rand, 0.3, (rand() - 0.5) * 0.4));
+    if (i !== 1) g.add(eyeOnFinger(curve, lerp(0.8, 0.86, rand()), R, profile, toward, lerp(1.15, 1.45, rand()), eyes, rand, rand() > 0.6 ? 0.25 : 0, (rand() - 0.5) * 0.5));
+    if (i === 1 || i === 2) g.add(eyeOnFinger(curve, lerp(0.5, 0.56, rand()), R, profile, toward, lerp(1.2, 1.4, rand()), eyes, rand, 0, (rand() - 0.5) * 0.3));
+    if (i === 0 || i === 3) g.add(eyeOnFinger(curve, lerp(0.3, 0.36, rand()), R, profile, toward, lerp(0.8, 1.0, rand()), eyes, rand, 0.3, (rand() - 0.5) * 0.4));
     group.add(g);
     flex.push({ g, phase: rand() * 6, amp: 0.035 });
   });
@@ -784,113 +805,77 @@ function makeChains(figures: THREE.Group[], rig: THREE.Object3D) {
 /* ---------------------------------------- the forest of dripping mushroom trees */
 
 function makeForest() {
+  // Background trees as on the cover: a flat mauve cap with a cyan rim line, an inverted cone
+  // underneath dotted with glowing almond-shaped spots, and pale strands drooping from the rim.
   const rand = rng(909);
   const group = new THREE.Group();
-  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x2a1c6a, roughness: 0.8, emissive: 0x0a0624 });
-  const capMat = new THREE.MeshStandardMaterial({ color: 0xc41d6e, roughness: 0.5, emissive: 0x3a0426, side: THREE.DoubleSide });
-  const spots: { top: THREE.Vector3; hang: number; r: number; phase: number }[] = [];
-  const loopPos: number[] = [];
-  const gillMat = new THREE.ShaderMaterial({
-    uniforms: { uT: { value: 0 } },
-    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
-    fragmentShader: `uniform float uT; varying vec2 vUv;
+  const time = { value: 0 };
+  const stemMat = new THREE.MeshStandardMaterial({ color: 0xcfc4f4, roughness: 0.75, emissive: 0x3a3070 });
+  const capMat = new THREE.MeshStandardMaterial({ color: 0xc03a8c, roughness: 0.55, emissive: 0x30062a });
+  capMat.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vObj;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvObj = position;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>\nvarying vec3 vObj;\n${NOISE_GLSL}`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        {
+          // speckles on the cap, and the thin cyan line along its rim
+          float sp = step(.9, h21(floor(vObj.xz * 12. + vObj.y * 6.)));
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1., .55, .8), sp * step(.02, vObj.y));
+          float rimLine = smoothstep(.95, .99, length(vObj.xz)) * smoothstep(.05, -.01, vObj.y);
+          totalEmissiveRadiance += vec3(.2, .85, 1.1) * rimLine;
+        }`);
+  };
+  const coneMat = new THREE.ShaderMaterial({
+    uniforms: { uT: time },
+    vertexShader: `varying vec2 vUv; varying vec3 vObj; void main(){ vUv = uv; vObj = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
+    fragmentShader: `uniform float uT; varying vec2 vUv; varying vec3 vObj;
+      ${NOISE_GLSL}
       void main() {
-        vec2 p = vUv - .5; float r = length(p) * 2.; float a = atan(p.y, p.x);
-        float gill = pow(.5 + .5 * sin(a * 60.), 3.);
-        vec3 c = mix(vec3(.01, .03, .2), vec3(.1, .7, 1.1), gill * smoothstep(.15, .9, r));
-        c *= .7 + .3 * sin(uT * 1.5 + r * 6.);
-        gl_FragColor = vec4(c, 1.);
+        // rows of almond spots around the cone, staggered like scales
+        vec2 q = vec2(vUv.x * 11., vUv.y * 4.2);
+        q.x += step(1., mod(floor(q.y), 2.)) * .5;
+        vec2 id = floor(q), f = fract(q) - .5;
+        float h = h21(id + 7.);
+        vec2 e = f / vec2(.2, .38);
+        float leaf = smoothstep(1., .75, length(e) + abs(e.x) * .5);
+        float on = step(.18, h) * smoothstep(.02, .15, vUv.y) * smoothstep(1., .85, vUv.y);
+        float tw = .75 + .25 * sin(uT * 1.6 + h * 30.);
+        vec3 base = vec3(.09, .05, .26) * (.45 + .55 * vUv.y);
+        vec3 col = mix(base, vec3(.25, 1.05, 1.2) * tw, leaf * on);
+        gl_FragColor = vec4(col, 1.);
       }`,
-    side: THREE.DoubleSide,
   });
-  const trees: THREE.Group[] = [];
+
   const places = [
     [-7.5, -4], [-11, -9], [-5.5, -12], [7.8, -4.5], [11.5, -9], [5.5, -13], [-15, -3], [15, -2.5], [0, -16], [-9, 1.5], [9.5, 2],
   ];
   const capGeo = new THREE.LatheGeometry(
-    [[0.001, 0.32], [0.4, 0.3], [0.75, 0.22], [1, 0.08], [1.04, 0], [0.95, -0.02], [0.2, 0.04]].map(([x, y]) => new THREE.Vector2(x, y)),
-    40,
+    [[0.001, 0.62], [0.3, 0.59], [0.55, 0.5], [0.75, 0.36], [0.9, 0.2], [0.99, 0.06], [1.02, 0.0], [0.98, -0.04], [0.85, -0.03]].map(([x, y]) => new THREE.Vector2(x, y)).reverse(),
+    48,
   );
   for (const [x, z] of places) {
     const t = new THREE.Group();
-    const h = lerp(4, 7, rand()), cr = lerp(1.3, 2.3, rand());
-    const trunkGeo = new THREE.CylinderGeometry(0.1, 0.2, h, 10, 12);
-    trunkGeo.translate(0, h / 2, 0);
-    const tp = trunkGeo.attributes.position as THREE.BufferAttribute;
-    const bend = (rand() - 0.5) * 0.8;
-    for (let i = 0; i < tp.count; i++) { const y = tp.getY(i) / h; tp.setX(i, tp.getX(i) + bend * y * y); }
-    trunkGeo.computeVertexNormals();
-    t.add(new THREE.Mesh(trunkGeo, trunkMat));
+    const h = lerp(2.6, 5, rand()), cr = lerp(1.2, 2.0, rand());
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.11 * cr, 0.17 * cr, h, 14), stemMat);
+    stem.position.y = h / 2;
+    t.add(stem);
     const cap = new THREE.Mesh(capGeo, capMat);
-    cap.scale.set(cr, cr * 0.8, cr);
-    cap.position.set(bend, h, 0);
+    cap.scale.set(cr, cr * 0.9, cr);
+    cap.position.y = h;
     t.add(cap);
+    const coneH = cr * lerp(0.4, 0.55, rand());
+    const coneGeo = new THREE.CylinderGeometry(cr * 0.9, 0.2 * cr, coneH, 40, 1, true);
+    coneGeo.translate(0, -coneH / 2, 0);
+    const cone = new THREE.Mesh(coneGeo, coneMat);
+    cone.position.y = h - 0.02;
+    t.add(cone);
     t.position.set(x, 0, z);
     t.rotation.y = rand() * 6;
-    t.userData.phase = rand() * 6;
     group.add(t);
-    trees.push(t);
-    // glowing gills on the underside of the cap
-    const gills = new THREE.Mesh(new THREE.CircleGeometry(cr * 0.98, 48), gillMat);
-    gills.rotation.x = Math.PI / 2;
-    gills.position.set(bend, h - 0.005, 0);
-    t.add(gills);
-    // drops hang from the gills on short threads, with a few drooping loops between them
-    const nDrops = Math.round(lerp(18, 30, rand()));
-    const under: THREE.Vector3[] = [];
-    for (let i = 0; i < nDrops; i++) {
-      const a = rand() * Math.PI * 2, rr = lerp(0.25, 0.95, Math.sqrt(rand())) * cr;
-      const top = new THREE.Vector3(x + bend * Math.cos(t.rotation.y) + Math.cos(a) * rr, h - 0.01, z - bend * Math.sin(t.rotation.y) + Math.sin(a) * rr);
-      under.push(top);
-      spots.push({ top, hang: lerp(0.12, 0.9, Math.pow(rand(), 1.3)), r: lerp(0.05, 0.11, rand()), phase: rand() * 6 });
-    }
-    for (let k = 0; k < 4; k++) {
-      const A = under[Math.floor(rand() * under.length)], B = under[Math.floor(rand() * under.length)];
-      if (A.distanceTo(B) < 0.4) continue;
-      const sag = lerp(0.3, 0.8, rand());
-      const N = 12;
-      for (let j = 0; j < N; j++) {
-        const u0 = j / N, u1 = (j + 1) / N;
-        const p0 = A.clone().lerp(B, u0).add(new THREE.Vector3(0, -sag * 4 * u0 * (1 - u0), 0));
-        const p1 = A.clone().lerp(B, u1).add(new THREE.Vector3(0, -sag * 4 * u1 * (1 - u1), 0));
-        loopPos.push(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z);
-      }
-    }
   }
-  const dropGeo = new THREE.SphereGeometry(1, 12, 10);
-  dropGeo.scale(0.6, 1.5, 0.6);
-  dropGeo.translate(0, -1.2, 0); // hang from the top of the drop
-  const drops = new THREE.InstancedMesh(dropGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }), spots.length);
-  const threadGeo = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(spots.length * 6), 3));
-  const threads = new THREE.LineSegments(threadGeo, new THREE.LineBasicMaterial({ color: new THREE.Color(0.25, 0.7, 0.9), transparent: true, opacity: 0.5 }));
-  threads.frustumCulled = false;
-  const loops = new THREE.LineSegments(
-    new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(loopPos, 3)),
-    new THREE.LineBasicMaterial({ color: new THREE.Color(0.35, 0.8, 1), transparent: true, opacity: 0.45 }),
-  );
-  group.add(drops, threads, loops);
-  const m = new THREE.Matrix4(), tip = new THREE.Vector3(), col = new THREE.Color();
-  function place(t: number) {
-    const tp = threadGeo.attributes.position as THREE.BufferAttribute;
-    spots.forEach((s, i) => {
-      // each drop swings gently on its thread and twinkles
-      const sw = Math.sin(t * 1.1 + s.phase) * 0.12, sw2 = Math.cos(t * 0.8 + s.phase * 1.7) * 0.08;
-      tip.copy(s.top).add(new THREE.Vector3(sw * s.hang, -s.hang, sw2 * s.hang));
-      m.makeScale(s.r, s.r, s.r).setPosition(tip.x, tip.y + s.r * 1.2, tip.z);
-      drops.setMatrixAt(i, m);
-      col.setRGB(0.3, 1.1, 1.45).multiplyScalar(0.75 + 0.35 * Math.sin(t * 2.2 + s.phase * 3));
-      drops.setColorAt(i, col);
-      tp.setXYZ(i * 2, s.top.x, s.top.y, s.top.z);
-      tp.setXYZ(i * 2 + 1, tip.x, tip.y + s.r * 0.2, tip.z);
-    });
-    drops.instanceMatrix.needsUpdate = true;
-    drops.instanceColor!.needsUpdate = true;
-    tp.needsUpdate = true;
-  }
-  place(0);
-  function update(t: number) {
-    gillMat.uniforms.uT.value = t;
-    place(t);
+  function update(tt: number) {
+    time.value = tt;
+
   }
   return { group, update };
 }
