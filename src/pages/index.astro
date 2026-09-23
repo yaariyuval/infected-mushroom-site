@@ -84,6 +84,16 @@ const jsonLd = shows.map((s) => ({
         <a href="#music">Music</a>
         <a href="#about">About</a>
         {site.shop_url && <a href={site.shop_url} rel="noopener">Merch<Arrow /></a>}
+        {site.links.spotify && (
+          <a class="icon-link" href={site.links.spotify} rel="noopener" aria-label="Infected Mushroom on Spotify">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M6.8 9.3c3.6-1.1 7.6-.8 10.6.9M7.4 12.4c3-.8 6.1-.5 8.6.8M8 15.3c2.3-.6 4.6-.4 6.5.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </a>
+        )}
+        {site.links.instagram && (
+          <a class="icon-link" href={site.links.instagram} rel="noopener" aria-label="Infected Mushroom on Instagram">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.8" y="2.8" width="18.4" height="18.4" rx="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="4.3" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="17.4" cy="6.6" r="1.1" fill="currentColor"/></svg>
+          </a>
+        )}
       </nav>
     </div>
   </header>
@@ -196,7 +206,10 @@ const jsonLd = shows.map((s) => ({
               {latest.data.tracks.length > 0 && (
                 <ol class="tracks">{latest.data.tracks.map((t) => <li>{t}</li>)}</ol>
               )}
-              {latest.data.listen && <a class="btn" href={latest.data.listen} rel="noopener">Listen now<Arrow /></a>}
+              <div class="listen">
+                {latest.data.listen && <a class="btn" href={latest.data.listen} rel="noopener">Listen now<Arrow /></a>}
+                {site.links.spotify && <a class="btn btn--ghost" href={site.links.spotify} rel="noopener">Spotify<Arrow /></a>}
+              </div>
             </div>
           </div>
         )}

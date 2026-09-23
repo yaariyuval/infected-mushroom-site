@@ -159,6 +159,14 @@ img { display: block; max-width: 100%; }
 }
 .nav a { text-decoration: none; color: var(--dim); transition: color 0.2s; }
 .nav a:hover { color: var(--bone); }
+.nav { align-items: center; }
+.icon-link { display: inline-flex; padding: 2px; }
+.icon-link svg { width: 20px; height: 20px; }
+.listen { display: flex; flex-wrap: wrap; gap: 12px; }
+@media (max-width: 480px) {
+  .nav { gap: 12px; }
+  .nav a:not(.icon-link) { font-size: 0.6875rem; }
+}
 
 /* ---------- Hero ---------- */
 
