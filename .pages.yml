@@ -1,0 +1,167 @@
+# Pages CMS configuration — https://pagescms.org
+# Editors sign in at https://app.pagescms.org with GitHub and pick this repo.
+media:
+  input: public/media
+  output: /media
+
+content:
+  - name: shows
+    label: Tour dates
+    type: collection
+    path: src/content/shows
+    format: yaml-frontmatter
+    filename: "{fields.date}-{fields.city}.md"
+    view:
+      fields: [date, city, country, venue]
+      primary: city
+      sort: [date, city]
+      search: [city, country, venue, event]
+      default:
+        sort: date
+        order: desc
+    fields:
+      - name: date
+        label: Date
+        type: date
+        required: true
+        description: The day of the show. Shows disappear from the site the day after they end.
+        options:
+          format: "yyyy-MM-dd"
+      - name: end_date
+        label: Last day (multi-day festivals only)
+        type: date
+        options:
+          format: "yyyy-MM-dd"
+      - name: city
+        label: City
+        type: string
+        required: true
+      - name: region
+        label: State / region
+        type: string
+        description: Optional, e.g. "CA". Leave empty outside the US.
+      - name: country
+        label: Country
+        type: string
+        required: true
+      - name: venue
+        label: Venue
+        type: string
+      - name: event
+        label: Event / festival name
+        type: string
+        description: Optional, e.g. "Tomorrowland Thailand".
+      - name: set
+        label: Set type
+        type: select
+        options:
+          creatable: true
+          values: ["DJ Set", "Live Band", "Live", "Retro Live", "Live Band + Retro Live"]
+      - name: tickets
+        label: Ticket link
+        type: string
+        pattern:
+          regex: "^(https?://.*)?$"
+          message: Paste the full link, starting with https://
+      - name: status
+        label: Status
+        type: select
+        options:
+          values: ["", "Few tickets left", "Sold out", "Postponed", "Cancelled"]
+      - name: note
+        label: Short note
+        type: string
+        description: Optional, shown under the venue. e.g. "with special guests".
+
+  - name: releases
+    label: Music
+    type: collection
+    path: src/content/releases
+    format: yaml-frontmatter
+    filename: "{primary}.md"
+    view:
+      fields: [title, year, featured]
+      primary: title
+      sort: [year, title]
+      default:
+        sort: year
+        order: desc
+    fields:
+      - name: title
+        label: Title
+        type: string
+        required: true
+      - name: year
+        label: Year
+        type: number
+        required: true
+      - name: label
+        label: Label
+        type: string
+      - name: type
+        label: Type
+        type: select
+        options:
+          creatable: true
+          values: ["Album", "EP", "Single", "Live"]
+      - name: cover
+        label: Cover art
+        type: image
+        description: Square image, at least 1000×1000.
+      - name: listen
+        label: Listen link
+        type: string
+        description: Smart link or streaming URL.
+      - name: featured
+        label: Feature on the homepage
+        type: boolean
+        description: Only one release should be featured at a time — the newest featured one wins.
+      - name: tracks
+        label: Tracklist
+        type: string
+        list: true
+      - name: body
+        label: Blurb
+        type: text
+
+  - name: site
+    label: Site settings
+    type: file
+    path: src/data/site.json
+    format: json
+    fields:
+      - name: tour_name
+        label: Tour name
+        type: string
+      - name: bio
+        label: Bio
+        type: text
+      - name: booking_email
+        label: Booking email
+        type: string
+      - name: shop_url
+        label: Merch store link
+        type: string
+      - name: fan_tickets_url
+        label: Fan tickets link
+        type: string
+      - name: plugins_url
+        label: Plugins link
+        type: string
+      - name: video_youtube_id
+        label: Featured YouTube video
+        type: string
+        description: The part after "v=" in the YouTube link, e.g. dQw4w9WgXcQ. Leave empty to hide.
+      - name: links
+        label: Social & streaming links
+        type: object
+        description: Leave any of these empty to hide it.
+        fields:
+          - { name: spotify, label: Spotify, type: string }
+          - { name: apple_music, label: Apple Music, type: string }
+          - { name: youtube, label: YouTube, type: string }
+          - { name: soundcloud, label: SoundCloud, type: string }
+          - { name: instagram, label: Instagram, type: string }
+          - { name: facebook, label: Facebook, type: string }
+          - { name: x, label: X / Twitter, type: string }
+          - { name: monstercat, label: Monstercat, type: string }

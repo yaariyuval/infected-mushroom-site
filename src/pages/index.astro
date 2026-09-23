@@ -1,0 +1,287 @@
+---
+import { getCollection } from 'astro:content';
+import Base from '../layouts/Base.astro';
+import SporePrint from '../components/SporePrint.astro';
+import Arrow from '../components/Arrow.astro';
+import site from '../data/site.json';
+import { asset, weekday, day, month, isoDay } from '../lib/util';
+
+// Build-time cut-off: anything that ended before yesterday (UTC) is gone.
+// A small script below also hides shows that end between builds.
+const cutoff = isoDay(new Date(Date.now() - 864e5));
+
+const shows = (await getCollection('shows'))
+  .map((s) => s.data)
+  .map((s) => ({ ...s, end: s.end_date ?? s.date }))
+  .filter((s) => isoDay(s.end) >= cutoff)
+  .sort((a, b) => +a.date - +b.date);
+
+const OFF = ['sold out', 'cancelled', 'postponed'];
+const isOff = (status: string) => OFF.includes(status.trim().toLowerCase());
+
+function when(s: (typeof shows)[number]) {
+  const sameDay = isoDay(s.date) === isoDay(s.end);
+  const sameMonth = month.format(s.date) === month.format(s.end);
+  return {
+    d: sameDay ? day.format(s.date) : `${day.format(s.date)}–${day.format(s.end)}`,
+    m: sameDay || sameMonth ? month.format(s.date) : `${month.format(s.date)}–${month.format(s.end)}`,
+    w: sameDay ? weekday.format(s.date) : `${weekday.format(s.date)}–${weekday.format(s.end)}`,
+  };
+}
+// Skip the venue when it just repeats the city or event name.
+const venue = (s: (typeof shows)[number]) => ([s.city, s.event].includes(s.venue) ? '' : s.venue);
+const place = (s: (typeof shows)[number]) => [s.city, s.region].filter(Boolean).join(', ');
+
+// Group by year so the list reads like a tour poster: 2026, 2027…
+const years = [...new Set(shows.map((s) => s.date.getUTCFullYear()))];
+
+const releases = (await getCollection('releases')).sort((a, b) => b.data.year - a.data.year);
+const latest = releases.find((r) => r.data.featured) ?? releases[0];
+
+const next = shows[0];
+
+const socials = Object.entries({
+  Spotify: site.links.spotify,
+  'Apple Music': site.links.apple_music,
+  YouTube: site.links.youtube,
+  SoundCloud: site.links.soundcloud,
+  Instagram: site.links.instagram,
+  Facebook: site.links.facebook,
+  X: site.links.x,
+  Monstercat: site.links.monstercat,
+}).filter(([, url]) => url);
+
+const group = { '@type': 'MusicGroup', name: 'Infected Mushroom', url: Astro.site?.href };
+const jsonLd = shows.map((s) => ({
+  '@context': 'https://schema.org',
+  '@type': 'MusicEvent',
+  name: s.event || `Infected Mushroom — ${s.city}`,
+  startDate: isoDay(s.date),
+  endDate: isoDay(s.end),
+  eventStatus: `https://schema.org/Event${
+    s.status.toLowerCase() === 'cancelled' ? 'Cancelled' : s.status.toLowerCase() === 'postponed' ? 'Postponed' : 'Scheduled'
+  }`,
+  eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode',
+  location: {
+    '@type': 'Place',
+    name: s.venue || s.city,
+    address: { '@type': 'PostalAddress', addressLocality: s.city, addressRegion: s.region || undefined, addressCountry: s.country },
+  },
+  performer: group,
+  ...(s.tickets ? { offers: { '@type': 'Offer', url: s.tickets, availability: `https://schema.org/${isOff(s.status) ? 'SoldOut' : 'InStock'}` } } : {}),
+}));
+---
+<Base
+  title="Infected Mushroom — Tour dates, music & merch"
+  description={`Infected Mushroom ${site.tour_name}: upcoming shows, tickets, and the new album ${latest?.data.title ?? ''}.`}
+  jsonLd={jsonLd}
+>
+  <header class="site-header">
+    <div class="wrap">
+      <a class="mark" href={asset('/')} aria-label="Infected Mushroom home">IM</a>
+      <nav class="nav" aria-label="Main">
+        <a href="#tour">Tour</a>
+        <a href="#music">Music</a>
+        <a href="#about">About</a>
+        {site.shop_url && <a href={site.shop_url} rel="noopener">Merch<Arrow /></a>}
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <SporePrint />
+      <div class="wrap">
+        <p class="eyebrow">Psytrance since 1996 · {site.tour_name}</p>
+        <h1 class="title"><span class="t1">Infected</span><span class="t2">Mushroom</span></h1>
+        <div class="hero-meta">
+          {next ? (
+            <>
+              <a class="btn" href="#tour">See all <span data-count>{shows.length}</span> dates</a>
+              <p class="next" id="next">
+                <span class="eyebrow">Next show</span>
+                <strong>
+                  <span data-next="when">{when(next).d} {when(next).m}</span> ·{' '}
+                  <span data-next="where">{place(next)}, {next.country}</span>
+                </strong>
+              </p>
+            </>
+          ) : (
+            <a class="btn" href="#music">Listen to {latest?.data.title}</a>
+          )}
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="tour" aria-labelledby="tour-title">
+      <div class="wrap">
+        <div class="section-head">
+          <h2 class="section-title" id="tour-title">Tour</h2>
+          <p class="eyebrow"><span data-count>{shows.length}</span> upcoming shows</p>
+        </div>
+
+        {shows.length > 0 && (
+          <ol class="shows">
+            {years.map((y) => (
+              <>
+                <li class="year-rule eyebrow" aria-hidden="true" data-year={y}>{y}</li>
+                {shows.filter((s) => s.date.getUTCFullYear() === y).map((s) => {
+                  const w = when(s);
+                  const off = isOff(s.status);
+                  return (
+                    <li
+                      class:list={['show', { 'is-off': off }]}
+                      data-end={isoDay(s.end)}
+                      data-year={y}
+                      data-when={`${w.d} ${w.m}`}
+                      data-where={`${place(s)}, ${s.country}`}
+                    >
+                      <time class="show-date" datetime={isoDay(s.date)}>
+                        <span class="m">{w.m}</span>
+                        <span class:list={['d', { range: w.d.length > 2 }]}>{w.d}</span>
+                        <span class="w">{w.w}</span>
+                      </time>
+                      <div class="show-place">
+                        <h3 class="show-city">
+                          {place(s)} <span class="country">{s.country}</span>
+                        </h3>
+                        <p class="show-venue">
+                          {s.event && <b>{s.event}</b>}
+                          {s.event && venue(s) && ' · '}
+                          {venue(s)}
+                          {s.note && <><br />{s.note}</>}
+                        </p>
+                        {s.set && <span class:list={['show-set', { 'is-live': /live/i.test(s.set) }]}>{s.set}</span>}
+                        {s.status && !off && <span class="show-status">{s.status}</span>}
+                      </div>
+                      <div class="show-action">
+                        {off ? (
+                          <span class="btn" aria-disabled="true">{s.status}</span>
+                        ) : s.tickets ? (
+                          <a class="btn" href={s.tickets} rel="noopener" aria-label={`Tickets for ${place(s)}, ${w.d} ${w.m}`}>Tickets</a>
+                        ) : (
+                          <span class="btn" aria-disabled="true">Soon</span>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </>
+            ))}
+          </ol>
+        )}
+        <p class="empty" data-empty hidden={shows.length > 0}>
+          New dates are on the way. Follow
+          {site.links.instagram ? <a href={site.links.instagram}>@infectedmushroom</a> : 'us'} to hear first.
+        </p>
+
+        <div class="tour-foot">
+          {site.fan_tickets_url && <a class="btn btn--ghost" href={site.fan_tickets_url} rel="noopener">Fan tickets<Arrow /></a>}
+          {site.booking_email && <a class="btn btn--ghost" href={`mailto:${site.booking_email}`}>Booking</a>}
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="music" aria-labelledby="music-title">
+      <div class="wrap">
+        {latest && (
+          <div class="latest">
+            <div class:list={['disc', { 'disc--empty': !latest.data.cover }]} style="--h: 0deg">
+              {latest.data.cover && <img src={asset(latest.data.cover)} alt={`${latest.data.title} cover art`} width="800" height="800" />}
+            </div>
+            <div>
+              <p class="eyebrow">New {latest.data.type.toLowerCase()} · {latest.data.year}{latest.data.label && ` · ${latest.data.label}`}</p>
+              <h2 class="latest-title" id="music-title">{latest.data.title}</h2>
+              {latest.body && <p class="latest-blurb">{latest.body.trim()}</p>}
+              {latest.data.tracks.length > 0 && (
+                <ol class="tracks">{latest.data.tracks.map((t) => <li>{t}</li>)}</ol>
+              )}
+              {latest.data.listen && <a class="btn" href={latest.data.listen} rel="noopener">Listen now<Arrow /></a>}
+            </div>
+          </div>
+        )}
+
+        {site.video_youtube_id && (
+          <div class="video" data-yt={site.video_youtube_id}>
+            <img src={`https://i.ytimg.com/vi/${site.video_youtube_id}/maxresdefault.jpg`} alt="" loading="lazy" />
+            <button type="button" aria-label="Play video"><span class="btn play">▶ Play video</span></button>
+          </div>
+        )}
+
+        <div class="section-head" style="margin-top: clamp(72px, 10vw, 140px)">
+          <h2 class="section-title">Discography</h2>
+          <p class="eyebrow">{releases.length} releases · {releases.at(-1)?.data.year}–{releases[0]?.data.year}</p>
+        </div>
+        <ul class="discog">
+          {releases.map((r) => {
+            const inner = (
+              <>
+                <div class:list={['disc', { 'disc--empty': !r.data.cover }]} style={`--h: ${((r.data.year * 37) % 110) - 55}deg`}>
+                  {r.data.cover && <img src={asset(r.data.cover)} alt="" loading="lazy" width="400" height="400" />}
+                </div>
+                <h3>{r.data.title}</h3>
+                <p class="eyebrow">{r.data.year}{r.data.label && ` · ${r.data.label}`}</p>
+              </>
+            );
+            return <li>{r.data.listen ? <a href={r.data.listen} rel="noopener">{inner}</a> : inner}</li>;
+          })}
+        </ul>
+      </div>
+    </section>
+
+    <section class="section" id="about" aria-labelledby="about-title">
+      <div class="wrap">
+        <div class="section-head">
+          <h2 class="section-title" id="about-title">About</h2>
+        </div>
+        <div class="about">
+          <p class="bio">{site.bio}</p>
+          <ul class="link-list">
+            {site.shop_url && <li><a href={site.shop_url} rel="noopener"><span>Merch store</span><span><Arrow /></span></a></li>}
+            {site.fan_tickets_url && <li><a href={site.fan_tickets_url} rel="noopener"><span>Fan tickets</span><span><Arrow /></span></a></li>}
+            {site.plugins_url && <li><a href={site.plugins_url} rel="noopener"><span>Infected plugins</span><span><Arrow /></span></a></li>}
+            {site.booking_email && <li><a href={`mailto:${site.booking_email}`}><span>Booking</span><span>{site.booking_email}</span></a></li>}
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <ul class="socials">
+        {socials.map(([name, url]) => <li><a href={url} rel="noopener">{name}</a></li>)}
+      </ul>
+      <p class="eyebrow">© {new Date().getFullYear()} Infected Mushroom</p>
+    </div>
+  </footer>
+</Base>
+
+<script>
+  // Hide shows that have ended since the last build (uses the visitor's local date).
+  const today = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+  document.querySelectorAll<HTMLElement>('.show[data-end]').forEach((el) => {
+    if (el.dataset.end! < today) el.remove();
+  });
+  document.querySelectorAll<HTMLElement>('.year-rule').forEach((rule) => {
+    if (!document.querySelector(`.show[data-year="${rule.dataset.year}"]`)) rule.remove();
+  });
+  const remaining = document.querySelectorAll<HTMLElement>('.show');
+  document.querySelectorAll('[data-count]').forEach((el) => (el.textContent = String(remaining.length)));
+  const first = remaining[0];
+  const next = document.getElementById('next');
+  if (next) {
+    if (first) {
+      next.querySelector('[data-next="when"]')!.textContent = first.dataset.when!;
+      next.querySelector('[data-next="where"]')!.textContent = first.dataset.where!;
+    } else next.hidden = true;
+  }
+  if (!remaining.length) document.querySelector<HTMLElement>('[data-empty]')!.hidden = false;
+
+  // Load YouTube only when someone presses play.
+  document.querySelectorAll<HTMLElement>('.video[data-yt]').forEach((box) => {
+    box.querySelector('button')!.addEventListener('click', () => {
+      box.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${box.dataset.yt}?autoplay=1" title="Infected Mushroom video" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+    });
+  });
+</script>
