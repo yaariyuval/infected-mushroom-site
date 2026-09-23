@@ -3,15 +3,16 @@
 @import '@fontsource-variable/martian-mono/standard.css';
 
 :root {
-  /* Spore-print palette: dark plum-brown paper, bone ink, blacklight pigments */
-  --spore: #140c10;
-  --gill: #1e1318;
-  --rule: #3b2a32;
-  --bone: #f2e7db;
-  --dim: #a38f97;
-  --uv: #a970ff;
-  --glo: #ff4f8b;
-  --ember: #ff8a3d;
+  /* Night-grove palette, lifted from the Monstercat-era covers:
+     indigo night, moonlight text, bioluminescent cyan + magenta */
+  --spore: #0c0920;
+  --gill: #161236;
+  --rule: #2c2657;
+  --bone: #eeeaff;
+  --dim: #9c95c9;
+  --uv: #3be8ff;
+  --glo: #ff3cc7;
+  --ember: #ffb23b;
 
   --display: 'Anybody Variable', 'Arial Narrow', sans-serif;
   --body: 'Geologica Variable', system-ui, sans-serif;
@@ -101,24 +102,24 @@ img { display: block; max-width: 100%; }
   text-transform: uppercase;
   text-decoration: none;
   white-space: nowrap;
-  transition: background 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
 }
 .btn:hover {
-  background: linear-gradient(100deg, var(--uv), var(--glo));
-  border-color: transparent;
+  background: transparent;
   color: var(--bone);
-  box-shadow: 0 0 28px -6px var(--glo);
 }
+.btn .arr { transition: translate 0.2s; }
+.btn:hover .arr { translate: 2px -2px; }
 .btn--ghost {
   background: transparent;
   color: var(--bone);
   border-color: var(--rule);
 }
+.btn--ghost:hover { border-color: var(--bone); }
 .btn[aria-disabled='true'] {
   background: transparent;
   color: var(--dim);
   border-color: var(--rule);
-  box-shadow: none;
   pointer-events: none;
 }
 
@@ -171,27 +172,29 @@ img { display: block; max-width: 100%; }
 }
 .hero canvas {
   position: absolute;
+  inset: 0;
   z-index: -1;
-  width: min(118vmin, 1180px);
-  aspect-ratio: 1;
-  right: max(-18vmin, -180px);
-  top: 50%;
-  translate: 0 -52%;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 1.2s ease;
+}
+.hero.is-lit canvas { opacity: 1; }
+.hero.no-webgl {
+  background: radial-gradient(60% 50% at 70% 45%, #3a1670 0%, transparent 70%),
+    linear-gradient(180deg, #0c0920 0%, #1d0f45 70%, #0c0920 100%);
 }
 .hero::after {
-  /* keep the title legible where it crosses the print */
+  /* keep the title legible over the scene */
   content: '';
   position: absolute;
   inset: 0;
   z-index: -1;
-  background: linear-gradient(90deg, var(--spore) 0%, rgb(20 12 16 / 0.55) 42%, transparent 70%),
-    linear-gradient(0deg, var(--spore) 0%, transparent 30%);
+  background: linear-gradient(90deg, rgb(12 9 32 / 0.75) 0%, rgb(12 9 32 / 0.25) 45%, transparent 65%),
+    linear-gradient(0deg, var(--spore) 0%, transparent 38%);
   pointer-events: none;
 }
 .hero .wrap { padding-block: 120px clamp(40px, 8vh, 88px); }
-@media (max-width: 640px) {
-  .hero canvas { width: 150vw; right: -62vw; top: 34%; }
-}
 
 .title {
   margin: 0;
@@ -201,6 +204,7 @@ img { display: block; max-width: 100%; }
   text-transform: uppercase;
 }
 .title span { display: block; }
+.title { text-shadow: 0 2px 30px rgb(12 9 32 / 0.6); }
 .title .t1 {
   font-stretch: 50%;
   font-size: clamp(4.4rem, 17vw, 15.5rem);

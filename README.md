@@ -51,15 +51,21 @@ npm run build    # outputs to dist/
 | Links, bio, settings | `src/data/site.json` |
 | Uploaded images | `public/media/` |
 | Page | `src/pages/index.astro` |
-| Hero animation | `src/components/SporePrint.astro` |
+| Hero 3D scene | `src/scripts/grove.ts` (loader: `src/components/MushroomScene.astro`) |
 | Styles and colour tokens | `src/styles/global.css` |
 | Deploy + daily rebuild | `.github/workflows/deploy.yml` |
 
 ## Design notes
 
-- **Hero:** the underside of a mushroom cap, drawn as a circular waveform. The gills pulse on a 145 BPM kick.
-  The animation pauses when it's off-screen or the tab is hidden, and it renders as a still image when the visitor has *reduce motion* set.
-- **Type:** Anybody (a variable-width display face) runs from ultra-condensed to extra-wide.
-  City names widen on hover. Geologica is used for text and Martian Mono for dates and labels. All fonts are self-hosted.
-- **Colour:** dark spore-print brown, with bone-coloured text and blacklight violet, magenta and ember accents.
-- **Covers:** until real cover art is uploaded, each release shows a generated spore-print disc.
+- **Hero:** a real-time 3D night grove, written with [three.js](https://threejs.org) in `src/scripts/grove.ts`. It draws on the band's Monstercat-era covers:
+  - Giant Amanita-style mushrooms with sculpted, lumpy caps, raised warts, a hanging skirt and about 150 glowing gill plates each.
+  - Clusters of bioluminescent mushrooms that ripple with light.
+  - A violet sky with a ringed planet, a crescent moon, shooting stars, a flying saucer with a tractor beam, and drifting spores.
+  - The glow pulses on a 145 BPM kick.
+- **Performance:**
+  - The 3D code is about 150 KB gzipped and loads only after the page is interactive. Until then, and on devices without WebGL, the hero shows a gradient.
+  - Rendering resolution adapts to how fast frames draw.
+  - The scene pauses when off-screen or in a background tab, and renders one still frame for visitors with *reduce motion* set.
+- **Type:** Anybody, a variable-width display face, runs from ultra-condensed to extra-wide. City names widen on hover. Geologica is used for text and Martian Mono for dates and labels. All fonts are self-hosted.
+- **Colour:** indigo night, moonlight text, and bioluminescent cyan and magenta, taken from the IM30, IM25 and Head of NASA covers.
+- **Covers** live in `public/media/covers/` and can be replaced from the CMS.

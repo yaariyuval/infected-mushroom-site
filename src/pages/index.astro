@@ -1,7 +1,7 @@
 ---
 import { getCollection } from 'astro:content';
 import Base from '../layouts/Base.astro';
-import SporePrint from '../components/SporePrint.astro';
+import MushroomScene from '../components/MushroomScene.astro';
 import Arrow from '../components/Arrow.astro';
 import site from '../data/site.json';
 import { asset, weekday, day, month, isoDay } from '../lib/util';
@@ -90,7 +90,7 @@ const jsonLd = shows.map((s) => ({
 
   <main>
     <section class="hero">
-      <SporePrint />
+      <MushroomScene />
       <div class="wrap">
         <p class="eyebrow">Psytrance since 1996 · {site.tour_name}</p>
         <h1 class="title"><span class="t1">Infected</span><span class="t2">Mushroom</span></h1>

@@ -6,4 +6,6 @@ export default defineConfig({
   site: process.env.SITE_URL || 'https://infected-mushroom.com',
   base: process.env.BASE_PATH || '/',
   trailingSlash: 'ignore',
+  // the 3D hero (three.js) is one lazy-loaded chunk by design
+  vite: { build: { chunkSizeWarningLimit: 700 } },
 });

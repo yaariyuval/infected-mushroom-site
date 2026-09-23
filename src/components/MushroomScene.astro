@@ -1,0 +1,43 @@
+---
+// Hero backdrop: a bioluminescent mushroom grove (see src/scripts/grove.ts).
+// Three.js loads after the page is interactive; until then (or without WebGL) the hero shows a CSS gradient.
+---
+<canvas id="grove" aria-hidden="true"></canvas>
+
+<script>
+  const canvas = document.getElementById('grove') as HTMLCanvasElement;
+  const hero = canvas.closest('.hero') as HTMLElement;
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function fallback(reason: unknown) {
+    console.warn('[grove]', reason);
+    canvas.remove();
+    hero.classList.add('no-webgl');
+  }
+
+  function hasWebGL() {
+    try {
+      const c = document.createElement('canvas');
+      return !!(c.getContext('webgl2') || c.getContext('webgl'));
+    } catch {
+      return false;
+    }
+  }
+
+  function boot() {
+    import('../scripts/grove')
+      .then(({ start }) => {
+        const handle = start(canvas, { still, onFirstFrame: () => hero.classList.add('is-lit') });
+        canvas.addEventListener('webglcontextlost', (e) => {
+          e.preventDefault();
+          handle.stop();
+          fallback('context lost');
+        });
+      })
+      .catch(fallback);
+  }
+
+  if (!hasWebGL()) fallback('WebGL unavailable');
+  else if ('requestIdleCallback' in window) requestIdleCallback(boot, { timeout: 1200 });
+  else setTimeout(boot, 150);
+</script>
