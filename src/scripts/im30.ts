@@ -7,7 +7,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { CYAN, MAGENTA, lerp, smooth, rng, noise3, makeMushroom, makeSpores, type GroveHandle } from './grove';
+import { CYAN, lerp, smooth, rng, noise3, makeMushroom, makeSpores, withGlow, type GroveHandle } from './grove';
 
 const BPM = 145;
 const PINK = new THREE.Color(0xe0287e);
@@ -166,7 +166,7 @@ function makePortal() {
         float n2v = fbm(vec2(sw * 11. - uT * .2, depth * 5. - uT * 1.6));
         vec3 col = mix(vec3(.01, .12, .42), vec3(.15, .7, 1.), smoothstep(.3, .8, n));
         col += vec3(.3, .85, 1.1) * pow(n2v, 3.) * .9;
-        col += vec3(.45, .85, 1.05) * pow(max(1. - r, 0.), 3.5) * (.6 + .3 * uKick);
+        col += vec3(.3, .7, .95) * pow(max(1. - r, 0.), 3.5) * (.45 + .25 * uKick);
         // stars rushing out of the tunnel
         vec2 sq = vec2(sw * 60., depth * 6. - uT * 2.2);
         vec2 sid = floor(sq), sf = fract(sq) - .5;
@@ -191,7 +191,7 @@ function makePortal() {
     g.font = '900 330px "Tektur Variable", "Arial Black", sans-serif';
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.shadowColor = 'rgba(120,240,255,0.9)';
+    g.shadowColor = 'rgba(10,40,120,0.9)';
     g.shadowBlur = 24;
     g.fillStyle = '#ffffff';
     g.fillText('IM30', 512, 270);
@@ -226,7 +226,7 @@ function makePortal() {
       m.position.y = -0.15 + 0.07 * Math.sin(t * 0.9) - i * 0.015;
       m.rotation.y = 0.06 * Math.sin(t * 0.3);
     });
-    (letters[0].material as THREE.MeshBasicMaterial).color.setRGB(0.8, 1, 1.05).multiplyScalar(0.8 + 0.18 * kick + 0.04 * Math.sin(t * 23));
+    (letters[0].material as THREE.MeshBasicMaterial).color.setRGB(0.82, 0.97, 1).multiplyScalar(0.62 + 0.12 * kick + 0.03 * Math.sin(t * 23));
     light.intensity = 11 + 6 * kick;
   }
   return { group, update, ringMat };
@@ -234,31 +234,86 @@ function makePortal() {
 
 /* ----------------------------------------------- mushrooms crowning the arch */
 
+// The cover's big mushrooms are trumpets: a wavy pink flared rim over a glowing, fluted cyan funnel
+// that runs straight down into the stem (no separate cap and gills).
+function makeTrumpet(seed: number, pulse: { value: number }) {
+  const prof = [
+    [0.2, -0.4], [0.2, 0], [0.22, 0.35], [0.28, 0.65], [0.42, 0.92], [0.66, 1.12], [0.98, 1.27], [1.3, 1.36],
+    [1.55, 1.4], [1.66, 1.44], [1.64, 1.5], [1.5, 1.54], [1.15, 1.56], [0.7, 1.52], [0.3, 1.47], [0.001, 1.46],
+  ].map(([x, y]) => new THREE.Vector2(x, y));
+  const UNDER = 9; // points before this index are the glowing underside
+  let geo: THREE.BufferGeometry = new THREE.LatheGeometry(prof, 128);
+  const p = geo.attributes.position as THREE.BufferAttribute;
+  const glow = new Float32Array(p.count), col = new Float32Array(p.count * 3);
+  const rows = prof.length, segs = 129;
+  const pn = (a: number, f: number, sd: number) => noise3(Math.cos(a) * f + sd * 7.3, Math.sin(a) * f, sd * 3.1) * 2 - 1;
+  const c = new THREE.Color();
+  for (let i = 0; i < p.count; i++) {
+    const row = i % rows; void segs;
+    let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const rho = Math.hypot(x, z), a = Math.atan2(z, x);
+    // irregular flare and a wavy, drooping margin
+    const flare = 1 + 0.08 * pn(a, 1.4, seed) * smooth(0.5, 1.6, rho);
+    x *= flare; z *= flare;
+    y += smooth(0.9, 1.66, rho) * (0.14 * pn(a, 2.2, seed + 2) - 0.05);
+    p.setXYZ(i, x, y, z);
+    if (row < UNDER) {
+      // fluted funnel: bright ribs running down into the stem
+      const rib = Math.pow(0.5 + 0.5 * Math.sin(a * 26 + Math.sin(y * 3 + seed) * 1.2), 2.2);
+      const k = smooth(-0.3, 0.6, y) * (0.35 + 0.65 * rib);
+      glow[i] = k * 0.75;
+      c.setRGB(0.04, 0.14, 0.55).lerp(new THREE.Color(0.2, 0.55, 1), rib * 0.5);
+    } else {
+      glow[i] = 0;
+      const rim = smooth(1.0, 1.66, rho);
+      c.setRGB(0.78, 0.07, 0.36).lerp(new THREE.Color(1, 0.35, 0.68), rim * 0.7 + 0.2 * noise3(x * 3, y * 3, z * 3));
+    }
+    col.set([c.r, c.g, c.b], i * 3);
+  }
+  geo.setAttribute('aGlow', new THREE.BufferAttribute(glow, 1));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.computeVertexNormals();
+  const mat = withGlow(
+    new THREE.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.45, clearcoat: 0.5, clearcoatRoughness: 0.35, side: THREE.DoubleSide }),
+    new THREE.Color(0.05, 0.62, 1.0), pulse,
+  );
+  const m = new THREE.Mesh(geo, mat);
+  const g = new THREE.Group();
+  g.add(m);
+  g.userData.seed = seed;
+  g.userData.cap = m;
+  return g;
+}
+
 function crownArch(parent: THREE.Group, pulse: { value: number }) {
-  const defs = [
-    { a: 128, s: 0.6, h: 1.5, r: 1.9, cap: 0xe0287e, big: true },
-    { a: 96, s: 0.5, h: 1.6, r: 1.7, cap: 0xd61f78, big: true },
-    { a: 58, s: 0.64, h: 1.5, r: 2.0, cap: 0xe8338a, big: true },
-    { a: 34, s: 0.48, h: 1.4, r: 1.7, cap: 0xda2a80, big: true },
-    { a: 112, s: 0.28, h: 1.6, r: 1.4, cap: 0x7b3fc4, big: false },
-    { a: 80, s: 0.3, h: 1.4, r: 1.5, cap: 0x6f35b8, big: false },
-    { a: 70, s: 0.22, h: 1.2, r: 1.3, cap: 0x8445c9, big: false },
-    { a: 145, s: 0.24, h: 1.3, r: 1.4, cap: 0x7b3fc4, big: false },
-  ];
   const up = new THREE.Vector3(0, 1, 0);
-  defs.forEach((d, i) => {
-    const m = makeMushroom({
-      h: d.h, r: d.r, bend: (i % 2 ? 0.12 : -0.12), seed: 40 + i, cap: d.cap,
-      glow: CYAN.clone().multiplyScalar(0.9), detail: d.big ? 0.8 : 0.45,
-      wart: 0xff2d55, warts: !d.big,
-    }, pulse);
-    const a = THREE.MathUtils.degToRad(d.a);
+  const place = (m: THREE.Object3D, deg: number, lift: number, lean: number) => {
+    const a = THREE.MathUtils.degToRad(deg);
     const dir = new THREE.Vector3(Math.cos(a), Math.sin(a), 0);
-    m.position.copy(dir).multiplyScalar(RING_R + TUBE * 0.55).add(new THREE.Vector3(0, 0, 0.12));
-    m.quaternion.setFromUnitVectors(up, dir.clone().lerp(up, 0.35).normalize());
-    m.scale.setScalar(d.s);
-    m.userData.seed = 40 + i;
+    m.position.copy(dir).multiplyScalar(RING_R + TUBE * lift).add(new THREE.Vector3(0, 0, 0.1));
+    m.quaternion.setFromUnitVectors(up, dir.clone().lerp(up, lean).normalize());
     parent.add(m);
+  };
+  // big trumpets, like the cover: a large one top-left, others down the right side
+  [
+    { deg: 122, s: 0.95, lean: 0.55 }, { deg: 150, s: 0.6, lean: 0.25 },
+    { deg: 58, s: 0.78, lean: 0.4 }, { deg: 28, s: 0.62, lean: 0.2 },
+  ].forEach((d, i) => {
+    const t = makeTrumpet(60 + i, pulse);
+    t.scale.setScalar(d.s);
+    place(t, d.deg, 0.45, d.lean);
+  });
+  // a cluster of little purple, red-spotted mushrooms along the crown
+  [
+    { deg: 98, s: 0.34 }, { deg: 88, s: 0.26 }, { deg: 80, s: 0.3 }, { deg: 106, s: 0.22 }, { deg: 72, s: 0.2 }, { deg: 92, s: 0.18 },
+  ].forEach((d, i) => {
+    const m = makeMushroom({
+      h: 1.1, r: 1.25, bend: (i % 2 ? 0.1 : -0.1), seed: 80 + i, cap: 0x7a3cc0,
+      glow: CYAN.clone().multiplyScalar(0.9), detail: 0.6, wart: 0xff2a3c,
+    }, pulse);
+    m.scale.setScalar(d.s);
+    m.userData.seed = 80 + i;
+    place(m, d.deg, 0.7, 0.6);
   });
 }
 
@@ -298,98 +353,145 @@ function makeRoots() {
 
 /* -------------------------------------------------------- eyed magenta claws */
 
-interface Eye { g: THREE.Group; phase: number }
+// Eyes are painted into the skin like on the cover: flat almond shapes drawn in a shader,
+// so the iris can follow the pointer and the lids can blink.
+interface Eye { mat: THREE.ShaderMaterial; phase: number }
 
-function makeEye(size: number) {
-  const g = new THREE.Group();
-  const white = new THREE.Mesh(new THREE.SphereGeometry(size, 24, 16), new THREE.MeshPhysicalMaterial({ color: 0xf2f4ff, roughness: 0.2, clearcoat: 1, emissive: 0x1a2040 }));
-  const iris = new THREE.Mesh(new THREE.CircleGeometry(size * 0.58, 32), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.08, 0.35, 1.2) }));
-  iris.position.z = size * 0.86;
-  const ringC = new THREE.Mesh(new THREE.RingGeometry(size * 0.52, size * 0.6, 32), new THREE.MeshBasicMaterial({ color: 0x0a1030 }));
-  ringC.position.z = size * 0.865;
-  const pupil = new THREE.Mesh(new THREE.CircleGeometry(size * 0.26, 24), new THREE.MeshBasicMaterial({ color: 0x5a0a28 }));
-  pupil.position.z = size * 0.87;
-  const glint = new THREE.Mesh(new THREE.CircleGeometry(size * 0.1, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color(2, 2, 2) }));
-  glint.position.set(size * 0.2, size * 0.2, size * 0.88);
-  g.add(white, iris, ringC, pupil, glint);
-  return g;
+const EYE_VERT = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`;
+const EYE_FRAG = `
+  uniform vec2 uLook; uniform float uBlink; varying vec2 vUv;
+  void main() {
+    vec2 p = (vUv - .5) * 2.;
+    float h = .58 * pow(max(1. - p.x * p.x, 0.), .8) * (1. - uBlink);
+    float edge = h - abs(p.y);
+    float alpha = smoothstep(-.1, -.06, edge);
+    if (alpha <= 0.) discard;
+    vec2 ip = p - uLook * vec2(.38, .16);
+    float ir = length(ip);
+    vec3 col = mix(vec3(.5, .55, .78), vec3(.82, .84, .9), smoothstep(0., .35, edge));        // sclera, shaded at the lids
+    vec3 irisC = mix(vec3(.08, .22, .9), vec3(.3, .55, 1.), smoothstep(.12, .42, ir));
+    col = mix(col, irisC, smoothstep(.44, .41, ir));
+    col = mix(col, vec3(.05, .08, .35), smoothstep(.02, 0., abs(ir - .43)));      // iris ring
+    col = mix(col, vec3(.42, .04, .1), smoothstep(.17, .14, ir));                  // maroon pupil
+    col = mix(col, vec3(1.1), smoothstep(.075, .05, length(ip - vec2(-.12, .12)))); // glint
+    col = mix(vec3(.3, .03, .18), col, smoothstep(0., .07, edge));                 // dark lid rim
+    col = mix(col, vec3(.15, .3, 1.), smoothstep(.07, 0., edge) * smoothstep(.55, .95, abs(p.x))); // blue corners
+    gl_FragColor = vec4(col, alpha);
+  }`;
+
+function makeEyeDecal(width: number, height: number, eyes: Eye[], rand: () => number) {
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uLook: { value: new THREE.Vector2() }, uBlink: { value: 0 } },
+    vertexShader: EYE_VERT, fragmentShader: EYE_FRAG,
+    transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2,
+  });
+  eyes.push({ mat, phase: rand() * 10 });
+  return new THREE.Mesh(new THREE.PlaneGeometry(width, height), mat);
 }
 
-function makeClaw(side: 1 | -1, scale: number, seed: number, eyes: Eye[]) {
+// A thick, fleshy finger: one tube whose radius tapers smoothly into a dark claw point.
+function makeFinger(curve: THREE.CatmullRomCurve3, R: number, skin: THREE.Material) {
+  const TS = 72, RS = 22;
+  const geo = new THREE.TubeGeometry(curve, TS, R, RS, false);
+  const p = geo.attributes.position as THREE.BufferAttribute;
+  const col = new Float32Array(p.count * 3), glow = new Float32Array(p.count);
+  const center = new THREE.Vector3(), v = new THREE.Vector3();
+  const skinC = new THREE.Color(0.95, 0.07, 0.45), crease = new THREE.Color(0.35, 0.01, 0.2), clawC = new THREE.Color(0.02, 0.02, 0.1);
+  const c = new THREE.Color();
+  const radius = (t: number) => {
+    if (t > 0.7) return Math.pow(1 - smooth(0.7, 1, t), 0.85) * 0.92 + 0.0;
+    return 1 - 0.1 * t + 0.06 * Math.exp(-Math.pow((t - 0.33) / 0.05, 2)) + 0.05 * Math.exp(-Math.pow((t - 0.56) / 0.05, 2));
+  };
+  for (let i = 0; i <= TS; i++) {
+    const t = i / TS;
+    curve.getPointAt(t, center);
+    const k = radius(t);
+    for (let j = 0; j <= RS; j++) {
+      const idx = i * (RS + 1) + j;
+      v.fromBufferAttribute(p, idx).sub(center).multiplyScalar(k).add(center);
+      p.setXYZ(idx, v.x, v.y, v.z);
+      c.copy(skinC);
+      c.lerp(crease, 0.7 * (Math.exp(-Math.pow((t - 0.35) / 0.018, 2)) + Math.exp(-Math.pow((t - 0.58) / 0.018, 2))));
+      const clawK = smooth(0.62, 0.78, t);
+      c.lerp(clawC, clawK);
+      col.set([c.r, c.g, c.b], idx * 3);
+      glow[idx] = 1 - clawK;
+    }
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setAttribute('aGlow', new THREE.BufferAttribute(glow, 1));
+  geo.computeVertexNormals();
+  return { mesh: new THREE.Mesh(geo, skin), radius };
+}
+
+function makeClaw(side: 1 | -1, scale: number, seed: number, nFingers: number, eyes: Eye[]) {
   const rand = rng(seed);
   const hand = new THREE.Group();
-  const skin = new THREE.MeshPhysicalMaterial({
-    color: 0xb8176a, roughness: 0.42, clearcoat: 0.35, clearcoatRoughness: 0.4,
-    sheen: 1, sheenColor: new THREE.Color(1, 0.4, 0.8), sheenRoughness: 0.5,
-  });
-  const claw = new THREE.MeshPhysicalMaterial({ color: 0x0c0a24, roughness: 0.18, metalness: 0.3, clearcoat: 1 });
+  hand.position.copy(PORTAL);
+  const skin = withGlow(new THREE.MeshPhysicalMaterial({
+    color: 0xffffff, vertexColors: true, roughness: 0.46, clearcoat: 0.4, clearcoatRoughness: 0.25,
+    sheen: 1, sheenColor: new THREE.Color(1, 0.3, 0.7), sheenRoughness: 0.45,
+  }), new THREE.Color(0.22, 0, 0.1), { value: 1 });
+  const inward = -side;
+  const R = 0.3 * scale;
 
-  // palm, mostly hidden behind the arch
-  const palm = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 24), skin);
-  palm.scale.set(1.25 * scale, 0.95 * scale, 0.55 * scale);
-  palm.position.set(side * (RING_R + 1.35 * scale), -0.1 * scale, -0.75);
-  palm.rotation.z = side * 0.25;
-  const wrist = new THREE.Mesh(new THREE.CylinderGeometry(0.45 * scale, 0.6 * scale, 3 * scale, 24), skin);
-  wrist.rotation.z = Math.PI / 2 - side * 0.35;
-  wrist.position.set(side * (RING_R + 2.7 * scale), -0.7 * scale, -0.9);
-  hand.add(wrist);
+  // the back of the hand, mostly off to the side and behind the fingers
+  const palmGeo = new THREE.SphereGeometry(1, 40, 28);
+  {
+    const p = palmGeo.attributes.position as THREE.BufferAttribute;
+    const col = new Float32Array(p.count * 3);
+    for (let i = 0; i < p.count; i++) col.set([0.85, 0.06, 0.42], i * 3);
+    palmGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    palmGeo.setAttribute('aGlow', new THREE.BufferAttribute(new Float32Array(p.count).fill(1), 1));
+  }
+  const palm = new THREE.Mesh(palmGeo, skin);
+  palm.scale.set(1.5 * scale, 1.5 * scale, 0.45 * scale);
+  palm.position.set(side * (RING_R + 2.1 * scale), -0.1, 0.1);
   hand.add(palm);
-  const e0 = makeEye(0.2 * scale);
-  e0.position.set(side * (RING_R + 1.3 * scale), 0.3 * scale, -0.3);
-  hand.add(e0);
-  eyes.push({ g: e0, phase: rand() * 10 });
-
-  const fingers: { joints: THREE.Group[]; base: number; phase: number; droop: number }[] = [];
-  for (let i = 0; i < 4; i++) {
-    const len = scale * lerp(1.7, 2.05, rand()) * (i === 0 || i === 3 ? 0.85 : 1);
-    const rad = scale * 0.16 * (i === 3 ? 0.85 : 1);
-    const root = new THREE.Group();
-    root.position.set(side * (RING_R + 0.55 * scale), (1.5 - i) * 0.42 * scale + 0.1, 0.1);
-    // start aimed inward and toward the viewer; the joints then curl the finger back over the arch
-    root.rotation.set(0, (side > 0 ? Math.PI : 0) - side * -0.95, (1.5 - i) * 0.1 * -side);
-    root.rotateY(0);
-    hand.add(root);
-    const joints: THREE.Group[] = [];
-    let parent: THREE.Object3D = root;
-    const segs = [0.42, 0.33, 0.25];
-    segs.forEach((f, k) => {
-      const L = len * f;
-      const r0 = rad * (1 - k * 0.2), r1 = rad * (1 - (k + 1) * 0.2);
-      const geo = new THREE.CylinderGeometry(r1, r0, L, 20, 4);
-      geo.rotateZ(-Math.PI / 2);
-      geo.translate(L / 2, 0, 0);
-      parent.add(new THREE.Mesh(geo, skin));
-      const knuckle = new THREE.Mesh(new THREE.SphereGeometry(r0 * 1.04, 20, 14), skin);
-      parent.add(knuckle);
-      if (k === 0 && rand() > 0.2) {
-        const eye = makeEye(r0 * 0.78);
-        eye.position.set(L * 0.55, r0 * 0.1, side * -r0 * 0.62);
-        parent.add(eye);
-        eyes.push({ g: eye, phase: rand() * 10 });
-      }
-      const joint = new THREE.Group();
-      joint.position.x = L;
-      parent.add(joint);
-      joints.push(joint);
-      parent = joint;
-    });
-    const tipR = rad * 0.4;
-    const tipGeo = new THREE.ConeGeometry(tipR * 1.05, len * 0.34, 18);
-    tipGeo.rotateZ(-Math.PI / 2);
-    tipGeo.translate(len * 0.17, 0, 0);
-    parent.add(new THREE.Mesh(tipGeo, claw));
-    parent.add(new THREE.Mesh(new THREE.SphereGeometry(tipR * 1.05, 14, 10), skin));
-    fingers.push({ joints, base: 0.5 + rand() * 0.12, phase: rand() * 6, droop: i < 2 ? 1 : -0.6 });
+  for (let k = 0; k < 2; k++) {
+    const e = makeEyeDecal(0.95 * scale, 0.5 * scale, eyes, rand);
+    e.position.set(side * (RING_R + (1.75 + k * 0.5) * scale), (0.55 - k * 0.95) * scale, 0.1 + 0.47 * scale);
+    e.rotation.z = (rand() - 0.5) * 0.4;
+    hand.add(e);
   }
 
-  hand.position.copy(PORTAL);
+  const fingers: { g: THREE.Group; phase: number; base: number }[] = [];
+  const spacing = 0.64 * scale;
+  for (let i = 0; i < nFingers; i++) {
+    const y0 = ((nFingers - 1) / 2 - i) * spacing;
+    const L = scale * lerp(2.1, 2.5, rand()) * (i === nFingers - 1 ? 0.85 : 1);
+    const droop = lerp(0.55, 0.85, rand()) * L * 0.4;
+    // reach inward over the front of the arch, then hook down into the portal
+    const pts = [
+      [0, 0, 0], [0.35, 0.04, 0.12], [0.75, 0.05, 0.2], [1.1, -0.02, 0.2], [1.38, -droop * 0.45, 0.12], [1.52, -droop, -0.02],
+    ].map(([u, y, z]) => new THREE.Vector3(inward * u * L / 1.52, y, z * scale));
+    const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+    const g = new THREE.Group();
+    g.position.set(side * (RING_R + 0.95 * scale), y0, 0.62 + R * 0.6);
+    const f = makeFinger(curve, R * (i === nFingers - 1 ? 0.85 : 1), skin);
+    g.add(f.mesh);
+    // eyes painted along the finger, on the side facing the viewer
+    const nEyes = rand() > 0.2 ? 1 : 0;
+    for (let k = 0; k < nEyes; k++) {
+      const t = lerp(0.18, 0.42, rand());
+      const pos = curve.getPointAt(t), tan = curve.getTangentAt(t);
+      const out = new THREE.Vector3(0, 0.35, 1).addScaledVector(tan, -tan.dot(new THREE.Vector3(0, 0.35, 1))).normalize();
+      const bi = new THREE.Vector3().crossVectors(out, tan).normalize();
+      const r = R * f.radius(t);
+      const e = makeEyeDecal(r * 2.5, r * 1.25, eyes, rand);
+      e.position.copy(pos).addScaledVector(out, r * 1.12);
+      e.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(tan.clone().multiplyScalar(inward), bi.multiplyScalar(inward), out));
+      g.add(e);
+    }
+    hand.add(g);
+    fingers.push({ g, phase: rand() * 6, base: (rand() - 0.5) * 0.08 });
+  }
+
   function update(t: number) {
     fingers.forEach((f) => {
-      const flex = f.base + 0.1 * Math.sin(t * 0.8 + f.phase) + 0.05 * Math.sin(t * 2.3 + f.phase * 2);
-      f.joints.forEach((j, k) => {
-        j.rotation.y = side * -flex * (0.55 + k * 0.2);
-        j.rotation.z = side * -(0.28 + 0.12 * k) * (0.8 + 0.4 * flex) * f.droop; // drape over the arch edge
-      });
+      // slow, uneasy flexing: the fingers tighten and relax their grip on the arch
+      f.g.rotation.z = side * (f.base + 0.05 * Math.sin(t * 0.7 + f.phase) + 0.025 * Math.sin(t * 2.1 + f.phase * 2));
+      f.g.rotation.y = side * 0.04 * Math.sin(t * 0.5 + f.phase);
     });
   }
   return { group: hand, update };
@@ -634,10 +736,10 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   scene.add(roots.group);
 
   const eyes: Eye[] = [];
-  const left = makeClaw(-1, 0.95, 3, eyes);
-  const right = makeClaw(1, 1.3, 8, eyes);
-  left.group.position.y -= 0.5;
-  right.group.position.y -= 0.35;
+  const left = makeClaw(-1, 0.85, 3, 4, eyes);
+  const right = makeClaw(1, 1.05, 8, 5, eyes);
+  left.group.position.y += 0.2;
+  right.group.position.y -= 0.2;
   scene.add(left.group, right.group);
 
   const figs = [makeFigure(), makeFigure()];
@@ -684,8 +786,6 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   let mx = 0, my = 0, tx = 0, ty = 0;
   const onMove = (e: PointerEvent) => { tx = e.clientX / innerWidth - 0.5; ty = 0.5 - e.clientY / innerHeight; };
   addEventListener('pointermove', onMove, { passive: true });
-  const ray = new THREE.Raycaster(), look = new THREE.Vector3(), plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -6);
-  const tmpQ = new THREE.Quaternion(), tmpObj = new THREE.Object3D();
 
   const t0 = performance.now();
   let first = true;
@@ -709,9 +809,9 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     portal.group.children.forEach((c) => {
       if (c.userData.seed) {
         const s = c.userData.seed as number;
-        (c.userData.cap as THREE.Group).scale.setScalar(1 + 0.02 * Math.sin(t * 0.9 + s));
-        const gm = c.userData.gills as THREE.MeshBasicMaterial;
-        gm.color.setScalar(0.85 + 0.4 * kick);
+        (c.userData.cap as THREE.Object3D).scale.setScalar(1 + 0.025 * Math.sin(t * 0.9 + s));
+        const gm = c.userData.gills as THREE.MeshBasicMaterial | undefined;
+        gm?.color.setScalar(0.85 + 0.4 * kick);
       }
     });
     roots.update(t);
@@ -729,17 +829,14 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     floor.mat.uniforms.uT.value = t;
     floor.mat.uniforms.uPulse.value = 0.7 + 0.6 * kick;
 
-    // eyes: look toward the pointer (or wander), blink now and then
-    ray.setFromCamera(new THREE.Vector2(mx * 2, my * 2), camera);
-    ray.ray.intersectPlane(plane, look);
+    // eyes: glance toward the pointer (or wander), blink now and then
     eyes.forEach((e) => {
-      const wander = new THREE.Vector3(Math.sin(t * 0.5 + e.phase) * 1.5, Math.cos(t * 0.37 + e.phase) * 0.8, 0);
-      e.g.getWorldPosition(tmpObj.position);
-      tmpObj.lookAt(look.x + wander.x, look.y + wander.y, look.z);
-      const parentQ = e.g.parent!.getWorldQuaternion(tmpQ).invert();
-      e.g.quaternion.slerp(parentQ.multiply(tmpObj.quaternion), 0.08);
-      const b = (t * 0.23 + e.phase * 0.13) % 1;
-      e.g.scale.y = b < 0.025 ? 0.12 : 1;
+      const lx = THREE.MathUtils.clamp(mx * 2.2 + 0.5 * Math.sin(t * 0.45 + e.phase), -1, 1);
+      const ly = THREE.MathUtils.clamp(my * 2.2 + 0.4 * Math.cos(t * 0.33 + e.phase), -1, 1);
+      const u = e.mat.uniforms.uLook.value as THREE.Vector2;
+      u.x += (lx - u.x) * 0.08; u.y += (ly - u.y) * 0.08;
+      const b = (t * 0.21 + e.phase * 0.137) % 1;
+      e.mat.uniforms.uBlink.value = b < 0.03 ? Math.sin((b / 0.03) * Math.PI) : 0;
     });
 
     composer.render();
