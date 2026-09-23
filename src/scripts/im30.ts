@@ -400,7 +400,7 @@ function makeFinger(curve: THREE.CatmullRomCurve3, R: number, skin: THREE.Materi
   const c = new THREE.Color();
   const radius = (t: number) => {
     if (t > 0.7) return Math.pow(1 - smooth(0.7, 1, t), 0.85) * 0.92 + 0.0;
-    return 1 - 0.1 * t + 0.06 * Math.exp(-Math.pow((t - 0.33) / 0.05, 2)) + 0.05 * Math.exp(-Math.pow((t - 0.56) / 0.05, 2));
+    return 1 - 0.12 * t + 0.1 * Math.exp(-Math.pow((t - 0.3) / 0.06, 2)) + 0.09 * Math.exp(-Math.pow((t - 0.58) / 0.06, 2));
   };
   for (let i = 0; i <= TS; i++) {
     const t = i / TS;
@@ -445,29 +445,34 @@ function makeClaw(side: 1 | -1, scale: number, seed: number, nFingers: number, e
     palmGeo.setAttribute('aGlow', new THREE.BufferAttribute(new Float32Array(p.count).fill(1), 1));
   }
   const palm = new THREE.Mesh(palmGeo, skin);
-  palm.scale.set(1.5 * scale, 1.5 * scale, 0.45 * scale);
-  palm.position.set(side * (RING_R + 2.1 * scale), -0.1, 0.1);
+  palm.scale.set(2.6 * scale, 1.55 * scale, 0.55 * scale);
+  palm.position.set(side * (RING_R + 3.0 * scale), -0.15 * scale, 0.05);
+  palm.rotation.z = side * -0.12;
   hand.add(palm);
   for (let k = 0; k < 2; k++) {
     const e = makeEyeDecal(0.95 * scale, 0.5 * scale, eyes, rand);
-    e.position.set(side * (RING_R + (1.75 + k * 0.5) * scale), (0.55 - k * 0.95) * scale, 0.1 + 0.47 * scale);
+    e.position.set(side * (RING_R + (2.0 + k * 0.9) * scale), (0.5 - k * 0.8) * scale, 0.05 + 0.5 * scale);
     e.rotation.z = (rand() - 0.5) * 0.4;
     hand.add(e);
   }
 
-  const fingers: { g: THREE.Group; phase: number; base: number }[] = [];
-  const spacing = 0.64 * scale;
+  const fingers: { g: THREE.Group; phase: number; base: number; fan: number }[] = [];
+  const spacing = 0.54 * scale;
   for (let i = 0; i < nFingers; i++) {
-    const y0 = ((nFingers - 1) / 2 - i) * spacing;
-    const L = scale * lerp(2.1, 2.5, rand()) * (i === nFingers - 1 ? 0.85 : 1);
-    const droop = lerp(0.55, 0.85, rand()) * L * 0.4;
-    // reach inward over the front of the arch, then hook down into the portal
+    const mid = (nFingers - 1) / 2;
+    const y0 = (mid - i) * spacing;
+    const L = scale * lerp(2.0, 2.6, rand()) * (i === 0 || i === nFingers - 1 ? 0.82 : 1);
+    const hook = lerp(0.7, 1.1, rand());
+    // knuckle-bent finger: out over the arch, a bend at the middle knuckle, then the claw hooks down and in
     const pts = [
-      [0, 0, 0], [0.35, 0.04, 0.12], [0.75, 0.05, 0.2], [1.1, -0.02, 0.2], [1.38, -droop * 0.45, 0.12], [1.52, -droop, -0.02],
-    ].map(([u, y, z]) => new THREE.Vector3(inward * u * L / 1.52, y, z * scale));
+      [0, 0, 0], [0.3, 0.06, 0.1], [0.62, 0.1, 0.18], [0.9, 0.04, 0.22],
+      [1.12, -0.18 * hook, 0.18], [1.3, -0.45 * hook, 0.08], [1.4, -0.72 * hook, -0.08],
+    ].map(([u, y, z]) => new THREE.Vector3(inward * u * L / 1.4, y * L / 1.4, z * scale));
     const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
     const g = new THREE.Group();
-    g.position.set(side * (RING_R + 0.95 * scale), y0, 0.62 + R * 0.6);
+    g.position.set(side * (RING_R + (1.05 + (i % 2) * 0.18 + Math.abs(i - mid) * 0.08) * scale), y0, 0.6 + R * 0.6 + (i % 2) * 0.12);
+    g.rotation.z = side * (i - mid) * 0.09;   // fan the fingers a little
+    g.rotation.x = (rand() - 0.5) * 0.25;     // and roll each one slightly
     const f = makeFinger(curve, R * (i === nFingers - 1 ? 0.85 : 1), skin);
     g.add(f.mesh);
     // eyes painted along the finger, on the side facing the viewer
@@ -484,13 +489,13 @@ function makeClaw(side: 1 | -1, scale: number, seed: number, nFingers: number, e
       g.add(e);
     }
     hand.add(g);
-    fingers.push({ g, phase: rand() * 6, base: (rand() - 0.5) * 0.08 });
+    fingers.push({ g, phase: rand() * 6, base: (rand() - 0.5) * 0.06, fan: g.rotation.z });
   }
 
   function update(t: number) {
     fingers.forEach((f) => {
       // slow, uneasy flexing: the fingers tighten and relax their grip on the arch
-      f.g.rotation.z = side * (f.base + 0.05 * Math.sin(t * 0.7 + f.phase) + 0.025 * Math.sin(t * 2.1 + f.phase * 2));
+      f.g.rotation.z = f.fan + side * (f.base + 0.05 * Math.sin(t * 0.7 + f.phase) + 0.025 * Math.sin(t * 2.1 + f.phase * 2));
       f.g.rotation.y = side * 0.04 * Math.sin(t * 0.5 + f.phase);
     });
   }
