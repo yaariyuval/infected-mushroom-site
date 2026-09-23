@@ -355,7 +355,7 @@ function makeRoots() {
 
 // Eyes are painted into the skin like on the cover: flat almond shapes drawn in a shader,
 // so the iris can follow the pointer and the lids can blink.
-interface Eye { mat: THREE.ShaderMaterial; phase: number }
+interface Eye { mat: THREE.ShaderMaterial; phase: number; lid: number }
 
 const EYE_VERT = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`;
 const EYE_FRAG = `
@@ -363,143 +363,194 @@ const EYE_FRAG = `
   void main() {
     vec2 p = (vUv - .5) * 2.;
     float h = .58 * pow(max(1. - p.x * p.x, 0.), .8) * (1. - uBlink);
-    float edge = h - abs(p.y);
+    float edge = h - abs(p.y + uBlink * .25);
     float alpha = smoothstep(-.1, -.06, edge);
     if (alpha <= 0.) discard;
     vec2 ip = p - uLook * vec2(.38, .16);
     float ir = length(ip);
-    vec3 col = mix(vec3(.5, .55, .78), vec3(.82, .84, .9), smoothstep(0., .35, edge));        // sclera, shaded at the lids
+    vec3 col = mix(vec3(.5, .55, .78), vec3(.82, .84, .9), smoothstep(0., .35, edge));
     vec3 irisC = mix(vec3(.08, .22, .9), vec3(.3, .55, 1.), smoothstep(.12, .42, ir));
     col = mix(col, irisC, smoothstep(.44, .41, ir));
-    col = mix(col, vec3(.05, .08, .35), smoothstep(.02, 0., abs(ir - .43)));      // iris ring
-    col = mix(col, vec3(.42, .04, .1), smoothstep(.17, .14, ir));                  // maroon pupil
-    col = mix(col, vec3(1.1), smoothstep(.075, .05, length(ip - vec2(-.12, .12)))); // glint
-    col = mix(vec3(.3, .03, .18), col, smoothstep(0., .07, edge));                 // dark lid rim
-    col = mix(col, vec3(.15, .3, 1.), smoothstep(.07, 0., edge) * smoothstep(.55, .95, abs(p.x))); // blue corners
+    col = mix(col, vec3(.05, .08, .35), smoothstep(.02, 0., abs(ir - .43)));
+    col = mix(col, vec3(.42, .04, .1), smoothstep(.17, .14, ir));
+    col = mix(col, vec3(1.1), smoothstep(.075, .05, length(ip - vec2(-.12, .12))));
+    col = mix(vec3(.3, .03, .18), col, smoothstep(0., .07, edge));
+    col = mix(col, vec3(.15, .3, 1.), smoothstep(.07, 0., edge) * smoothstep(.55, .95, abs(p.x)));
     gl_FragColor = vec4(col, alpha);
   }`;
 
-function makeEyeDecal(width: number, height: number, eyes: Eye[], rand: () => number) {
+function makeEyeDecal(width: number, height: number, eyes: Eye[], rand: () => number, lid = 0) {
   const mat = new THREE.ShaderMaterial({
-    uniforms: { uLook: { value: new THREE.Vector2() }, uBlink: { value: 0 } },
+    uniforms: { uLook: { value: new THREE.Vector2() }, uBlink: { value: lid } },
     vertexShader: EYE_VERT, fragmentShader: EYE_FRAG,
     transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2,
   });
-  eyes.push({ mat, phase: rand() * 10 });
+  eyes.push({ mat, phase: rand() * 10, lid });
   return new THREE.Mesh(new THREE.PlaneGeometry(width, height), mat);
 }
 
-// A thick, fleshy finger: one tube whose radius tapers smoothly into a dark claw point.
-function makeFinger(curve: THREE.CatmullRomCurve3, R: number, skin: THREE.Material) {
-  const TS = 72, RS = 22;
+// One tube along a curve; `profile(t)` scales the radius (0 at the root, 1 at the tip),
+// `claw` is where the skin fades into a dark claw point (or null for a rounded fingertip).
+function makeFinger(curve: THREE.CatmullRomCurve3, R: number, skin: THREE.Material, profile: (t: number) => number, claw: [number, number] | null) {
+  const TS = 80, RS = 24;
   const geo = new THREE.TubeGeometry(curve, TS, R, RS, false);
   const p = geo.attributes.position as THREE.BufferAttribute;
   const col = new Float32Array(p.count * 3), glow = new Float32Array(p.count);
   const center = new THREE.Vector3(), v = new THREE.Vector3();
-  const skinC = new THREE.Color(0.95, 0.07, 0.45), crease = new THREE.Color(0.35, 0.01, 0.2), clawC = new THREE.Color(0.02, 0.02, 0.1);
+  const skinC = new THREE.Color(0.95, 0.07, 0.45), shade = new THREE.Color(0.55, 0.03, 0.32), clawC = new THREE.Color(0.02, 0.02, 0.1);
   const c = new THREE.Color();
-  const radius = (t: number) => {
-    if (t > 0.7) return Math.pow(1 - smooth(0.7, 1, t), 0.85) * 0.92 + 0.0;
-    return 1 - 0.12 * t + 0.1 * Math.exp(-Math.pow((t - 0.3) / 0.06, 2)) + 0.09 * Math.exp(-Math.pow((t - 0.58) / 0.06, 2));
-  };
   for (let i = 0; i <= TS; i++) {
     const t = i / TS;
     curve.getPointAt(t, center);
-    const k = radius(t);
+    const k = profile(t);
     for (let j = 0; j <= RS; j++) {
       const idx = i * (RS + 1) + j;
       v.fromBufferAttribute(p, idx).sub(center).multiplyScalar(k).add(center);
       p.setXYZ(idx, v.x, v.y, v.z);
-      c.copy(skinC);
-      c.lerp(crease, 0.7 * (Math.exp(-Math.pow((t - 0.35) / 0.018, 2)) + Math.exp(-Math.pow((t - 0.58) / 0.018, 2))));
-      const clawK = smooth(0.62, 0.78, t);
-      c.lerp(clawC, clawK);
+      // painterly: darker toward the root, lighter along the length
+      c.copy(shade).lerp(skinC, smooth(0, 0.35, t));
+      const ck = claw ? smooth(claw[0], claw[1], t) : 0;
+      c.lerp(clawC, ck);
       col.set([c.r, c.g, c.b], idx * 3);
-      glow[idx] = 1 - clawK;
+      glow[idx] = 1 - ck;
+    }
+  }
+  geo.computeVertexNormals();
+  // painted shading: undersides fall into deep crease shadow where fingers press together,
+  // with a few darker wrinkle bands across the knuckles
+  const nrm = geo.attributes.normal as THREE.BufferAttribute;
+  for (let i = 0; i <= TS; i++) {
+    const t = i / TS;
+    const wrinkle = 1 - 0.35 * Math.max(Math.exp(-Math.pow((t - 0.58) / 0.012, 2)), Math.exp(-Math.pow((t - 0.66) / 0.012, 2)), Math.exp(-Math.pow((t - 0.33) / 0.012, 2)));
+    for (let j = 0; j <= RS; j++) {
+      const idx = i * (RS + 1) + j;
+      const ny = nrm.getY(idx);
+      const k = (0.35 + 0.65 * smooth(-0.75, 0.35, ny)) * wrinkle;
+      col[idx * 3] *= k; col[idx * 3 + 1] *= k; col[idx * 3 + 2] *= k * 1.05;
+      glow[idx] *= k;
     }
   }
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   geo.setAttribute('aGlow', new THREE.BufferAttribute(glow, 1));
-  geo.computeVertexNormals();
-  return { mesh: new THREE.Mesh(geo, skin), radius };
+  return new THREE.Mesh(geo, skin);
 }
 
-function makeClaw(side: 1 | -1, scale: number, seed: number, nFingers: number, eyes: Eye[]) {
-  const rand = rng(seed);
-  const hand = new THREE.Group();
-  hand.position.copy(PORTAL);
-  const skin = withGlow(new THREE.MeshPhysicalMaterial({
+// Place an almond eye flat on a finger's surface at curve position t, facing `toward`.
+function eyeOnFinger(curve: THREE.CatmullRomCurve3, t: number, r: number, toward: THREE.Vector3, size: number, eyes: Eye[], rand: () => number, lid = 0) {
+  const pos = curve.getPointAt(t), tan = curve.getTangentAt(t);
+  if (tan.x > 0) tan.negate(); // keep the eye's long axis reading left-to-right consistently
+  const out = toward.clone().addScaledVector(tan, -tan.dot(toward)).normalize();
+  const bi = new THREE.Vector3().crossVectors(out, tan).normalize();
+  const e = makeEyeDecal(r * 2.4 * size, r * 1.2 * size, eyes, rand, lid);
+  e.position.copy(pos).addScaledVector(out, r * 1.1);
+  e.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(tan.clone().negate(), bi.negate(), out));
+  return e;
+}
+
+function skinMaterial() {
+  return withGlow(new THREE.MeshPhysicalMaterial({
     color: 0xffffff, vertexColors: true, roughness: 0.46, clearcoat: 0.4, clearcoatRoughness: 0.25,
     sheen: 1, sheenColor: new THREE.Color(1, 0.3, 0.7), sheenRoughness: 0.45,
   }), new THREE.Color(0.22, 0, 0.1), { value: 1 });
-  const inward = -side;
-  const R = 0.3 * scale;
+}
 
-  // the back of the hand, mostly off to the side and behind the fingers
-  const palmGeo = new THREE.SphereGeometry(1, 40, 28);
-  {
-    const p = palmGeo.attributes.position as THREE.BufferAttribute;
-    const col = new Float32Array(p.count * 3);
-    for (let i = 0; i < p.count; i++) col.set([0.85, 0.06, 0.42], i * 3);
-    palmGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    palmGeo.setAttribute('aGlow', new THREE.BufferAttribute(new Float32Array(p.count).fill(1), 1));
-  }
-  const palm = new THREE.Mesh(palmGeo, skin);
-  palm.scale.set(2.6 * scale, 1.55 * scale, 0.55 * scale);
-  palm.position.set(side * (RING_R + 3.0 * scale), -0.15 * scale, 0.05);
-  palm.rotation.z = side * -0.12;
-  hand.add(palm);
-  for (let k = 0; k < 2; k++) {
-    const e = makeEyeDecal(0.95 * scale, 0.5 * scale, eyes, rand);
-    e.position.set(side * (RING_R + (2.0 + k * 0.9) * scale), (0.5 - k * 0.8) * scale, 0.05 + 0.5 * scale);
-    e.rotation.z = (rand() - 0.5) * 0.4;
-    hand.add(e);
-  }
+type Flexer = { g: THREE.Group; phase: number; amp: number };
 
-  const fingers: { g: THREE.Group; phase: number; base: number; fan: number }[] = [];
-  const spacing = 0.54 * scale;
-  for (let i = 0; i < nFingers; i++) {
-    const mid = (nFingers - 1) / 2;
-    const y0 = (mid - i) * spacing;
-    const L = scale * lerp(2.0, 2.6, rand()) * (i === 0 || i === nFingers - 1 ? 0.82 : 1);
-    const hook = lerp(0.7, 1.1, rand());
-    // knuckle-bent finger: out over the arch, a bend at the middle knuckle, then the claw hooks down and in
+// Left: talons only (no palm, no arm), reaching out of the dark around the arch's outer edge,
+// beak-like and tapering into long dark claws, with half-closed slit eyes near the base.
+function makeTalons(scale: number, seed: number, eyes: Eye[]) {
+  const rand = rng(seed);
+  const group = new THREE.Group();
+  group.position.copy(PORTAL);
+  const skin = skinMaterial();
+  const toward = new THREE.Vector3(0.1, 0.45, 1).normalize();
+  const flex: Flexer[] = [];
+  const n = 4;
+  for (let i = 0; i < n; i++) {
+    const y = (1.5 - i) * 0.62 * scale + 0.1;
+    const R = 0.34 * scale * (i === n - 1 ? 0.85 : 1);
+    const x0 = -RING_R;
     const pts = [
-      [0, 0, 0], [0.3, 0.06, 0.1], [0.62, 0.1, 0.18], [0.9, 0.04, 0.22],
-      [1.12, -0.18 * hook, 0.18], [1.3, -0.45 * hook, 0.08], [1.4, -0.72 * hook, -0.08],
-    ].map(([u, y, z]) => new THREE.Vector3(inward * u * L / 1.4, y * L / 1.4, z * scale));
+      [x0 - 1.0, y + 0.25, -0.9], [x0 - 1.1, y + 0.2, 0.0], [x0 - 0.7, y + 0.05, 0.72],
+      [x0 + 0.0, y - 0.15, 0.92], [x0 + 0.65, y - 0.45, 0.78], [x0 + 1.05, y - 0.72, 0.55],
+    ].map(([x, yy, z]) => new THREE.Vector3(x, yy, z * (0.9 + 0.1 * scale)));
     const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+    const profile = (t: number) => {
+      const beak = 1 - 0.45 * smooth(0.35, 1, t);
+      return t > 0.8 ? beak * Math.pow(1 - smooth(0.8, 1, t), 0.8) : beak;
+    };
     const g = new THREE.Group();
-    g.position.set(side * (RING_R + (1.05 + (i % 2) * 0.18 + Math.abs(i - mid) * 0.08) * scale), y0, 0.6 + R * 0.6 + (i % 2) * 0.12);
-    g.rotation.z = side * (i - mid) * 0.09;   // fan the fingers a little
-    g.rotation.x = (rand() - 0.5) * 0.25;     // and roll each one slightly
-    const f = makeFinger(curve, R * (i === nFingers - 1 ? 0.85 : 1), skin);
-    g.add(f.mesh);
-    // eyes painted along the finger, on the side facing the viewer
-    const nEyes = rand() > 0.2 ? 1 : 0;
-    for (let k = 0; k < nEyes; k++) {
-      const t = lerp(0.18, 0.42, rand());
-      const pos = curve.getPointAt(t), tan = curve.getTangentAt(t);
-      const out = new THREE.Vector3(0, 0.35, 1).addScaledVector(tan, -tan.dot(new THREE.Vector3(0, 0.35, 1))).normalize();
-      const bi = new THREE.Vector3().crossVectors(out, tan).normalize();
-      const r = R * f.radius(t);
-      const e = makeEyeDecal(r * 2.5, r * 1.25, eyes, rand);
-      e.position.copy(pos).addScaledVector(out, r * 1.12);
-      e.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(tan.clone().multiplyScalar(inward), bi.multiplyScalar(inward), out));
-      g.add(e);
-    }
-    hand.add(g);
-    fingers.push({ g, phase: rand() * 6, base: (rand() - 0.5) * 0.06, fan: g.rotation.z });
+    g.add(makeFinger(curve, R, skin, profile, [0.56, 0.74]));
+    g.add(eyeOnFinger(curve, lerp(0.38, 0.44, rand()), R * profile(0.42), toward, 1.45, eyes, rand, 0.3));
+    group.add(g);
+    flex.push({ g, phase: rand() * 6, amp: 0.05 });
   }
-
   function update(t: number) {
-    fingers.forEach((f) => {
-      // slow, uneasy flexing: the fingers tighten and relax their grip on the arch
-      f.g.rotation.z = f.fan + side * (f.base + 0.05 * Math.sin(t * 0.7 + f.phase) + 0.025 * Math.sin(t * 2.1 + f.phase * 2));
-      f.g.rotation.y = side * 0.04 * Math.sin(t * 0.5 + f.phase);
-    });
+    flex.forEach((f) => { f.g.rotation.z = -f.amp * (0.5 + 0.5 * Math.sin(t * 0.7 + f.phase)); f.g.rotation.y = 0.03 * Math.sin(t * 0.5 + f.phase); });
   }
-  return { group: hand, update };
+  return { group, update };
+}
+
+// Right: a clenched fist reaching in from off-frame. Fat fingers stacked tight, each folding over
+// the front of the arch at the knuckle and curling away behind it; a big almond eye on each knuckle,
+// more eyes further back along the fingers, and goo dripping from the bottom.
+function makeFist(scale: number, seed: number, eyes: Eye[]) {
+  const rand = rng(seed);
+  const group = new THREE.Group();
+  group.position.copy(PORTAL);
+  const skin = skinMaterial();
+  const toward = new THREE.Vector3(-0.15, 0.25, 1).normalize();
+  const flex: Flexer[] = [];
+  const n = 5;
+  const mid = (n - 1) / 2;
+  for (let i = 0; i < n; i++) {
+    const y = (mid - i) * 0.6 * scale + (rand() - 0.5) * 0.08;
+    const R = 0.37 * scale * (i === n - 1 ? 0.85 : 1);
+    const x0 = RING_R;
+    const reach = lerp(-0.2, 0.1, rand()) + (i === 0 || i === n - 1 ? -0.25 : 0);
+    const pts = [
+      [x0 + 3.6, y - 0.1, 0.35], [x0 + 2.2, y, 0.8], [x0 + 1.0, y + 0.05, 1.0],
+      [x0 - reach, y - 0.05, 1.0], [x0 - reach - 0.45, y - 0.35, 0.6], [x0 - reach - 0.45, y - 0.4, -0.2],
+    ].map(([x, yy, z]) => new THREE.Vector3(x, yy, z));
+    const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+    const profile = (t: number) => {
+      const knuckle = 0.1 * Math.exp(-Math.pow((t - 0.62) / 0.07, 2)) + 0.07 * Math.exp(-Math.pow((t - 0.35) / 0.07, 2));
+      const tip = t > 0.9 ? Math.sqrt(Math.max(0, 1 - Math.pow((t - 0.9) / 0.1, 2))) : 1;
+      return (1 - 0.1 * t + knuckle) * tip;
+    };
+    const g = new THREE.Group();
+    g.add(makeFinger(curve, R, skin, profile, null));
+    g.add(eyeOnFinger(curve, lerp(0.56, 0.62, rand()), R, toward, 1.05, eyes, rand));
+    if (i % 2 === 0) g.add(eyeOnFinger(curve, lerp(0.3, 0.36, rand()), R, toward, 0.9, eyes, rand));
+    group.add(g);
+    flex.push({ g, phase: rand() * 6, amp: 0.035 });
+  }
+  // goo dripping from the bottom of the fist: a thin strand swelling into a drop
+  const gooMat = skinMaterial();
+  const drips: THREE.Group[] = [];
+  const bottomY = (mid - (n - 1)) * 0.6 * scale - 0.31 * scale * 0.85 + 0.05;
+  for (let k = 0; k < 4; k++) {
+    const len = lerp(0.25, 0.7, rand());
+    const d = new THREE.Group();
+    const prof = [[0.001, 0], [0.05, -0.02], [0.03, -0.25], [0.028, -len * 0.7], [0.06, -len * 0.92], [0.075, -len - 0.04], [0.05, -len - 0.12], [0.001, -len - 0.14]]
+      .map(([x, y]) => new THREE.Vector2(x * scale * 1.4, y));
+    const geo = new THREE.LatheGeometry([...prof].reverse(), 16);
+    const cnt = geo.attributes.position.count;
+    const col = new Float32Array(cnt * 3);
+    for (let i = 0; i < cnt; i++) col.set([0.85, 0.05, 0.4], i * 3);
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geo.setAttribute('aGlow', new THREE.BufferAttribute(new Float32Array(cnt).fill(1), 1));
+    d.add(new THREE.Mesh(geo, gooMat));
+    d.position.set(RING_R + lerp(0.2, 2.0, rand()), bottomY, 0.95);
+    d.userData.phase = rand() * 6;
+    drips.push(d);
+    group.add(d);
+  }
+  function update(t: number) {
+    flex.forEach((f) => { f.g.rotation.z = f.amp * Math.sin(t * 0.6 + f.phase); f.g.position.x = 0.04 * Math.sin(t * 0.8 + f.phase); });
+    drips.forEach((d) => { d.scale.y = 1 + 0.25 * Math.sin(t * 0.9 + d.userData.phase); });
+  }
+  return { group, update };
 }
 
 /* ---------------------------------------------------- chains and figures */
@@ -741,10 +792,9 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   scene.add(roots.group);
 
   const eyes: Eye[] = [];
-  const left = makeClaw(-1, 0.85, 3, 4, eyes);
-  const right = makeClaw(1, 1.05, 8, 5, eyes);
-  left.group.position.y += 0.2;
-  right.group.position.y -= 0.2;
+  const left = makeTalons(0.9, 3, eyes);
+  const right = makeFist(1.0, 8, eyes);
+  right.group.position.y -= 0.15;
   scene.add(left.group, right.group);
 
   const figs = [makeFigure(), makeFigure()];
@@ -841,7 +891,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
       const u = e.mat.uniforms.uLook.value as THREE.Vector2;
       u.x += (lx - u.x) * 0.08; u.y += (ly - u.y) * 0.08;
       const b = (t * 0.21 + e.phase * 0.137) % 1;
-      e.mat.uniforms.uBlink.value = b < 0.03 ? Math.sin((b / 0.03) * Math.PI) : 0;
+      e.mat.uniforms.uBlink.value = Math.max(e.lid, b < 0.03 ? Math.sin((b / 0.03) * Math.PI) : 0);
     });
 
     composer.render();
