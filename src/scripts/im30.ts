@@ -637,12 +637,12 @@ function makeFist(scale: number, seed: number, eyes: Eye[]) {
     const y = yy * scale;
     const R = 0.44 * scale * (i === 3 ? 0.88 : 1);
     const bend = lerp(0.75, 1.0, rand());
-    const tipIn = lerp(0.3, 0.6, rand()) + (i === 0 ? -0.15 : 0);
+    const tipIn = lerp(0.2, 0.45, rand()) + (i === 0 ? -0.1 : 0);
     const X = RING_R;
     const z0 = 0.95 - i * 0.05;
     const pts = [
-      [X + 3.1, y + 0.25, 0.1], [X + 2.1, y + 0.2, z0 - 0.2], [X + 1.1, y + 0.12, z0],
-      [X + 0.25, y + 0.02, z0 + 0.08], [X - tipIn * 0.6, y - 0.35 * bend, z0 + 0.02], [X - tipIn, y - 0.85 * bend, z0 - 0.12],
+      [X + 2.0, y + 0.2, 0.2], [X + 1.35, y + 0.15, z0 - 0.15], [X + 0.75, y + 0.1, z0],
+      [X + 0.2, y + 0.02, z0 + 0.08], [X - tipIn * 0.5, y - 0.3 * bend, z0 + 0.02], [X - tipIn * 0.75, y - 0.7 * bend, z0 - 0.12],
     ].map(([x, yv, z]) => new THREE.Vector3(x, yv, z));
     const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
     const profile = (t: number) => {
@@ -1029,7 +1029,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
 
     const ang = 0.14 * Math.sin(t * 0.07) + mx * 0.16;
     const dist = portrait ? 19 : 17;
-    const shiftX = portrait ? 0 : -Math.min(5.2, 2.9 * camera.aspect);
+    const shiftX = portrait ? -1.3 : -Math.min(5.2, 2.9 * camera.aspect);
     camera.position.set(Math.sin(ang) * dist + (portrait ? 0 : 0.8), (portrait ? 7.4 : 6.4) + my * 0.5 + 0.12 * Math.sin(t * 0.13), Math.cos(ang) * dist);
     target.set(shiftX, (portrait ? 0.9 : 1.9) + my * 0.2, 0);
     if (debug.cam) { camera.position.fromArray(debug.cam[0]); target.fromArray(debug.cam[1]); }

@@ -210,12 +210,12 @@ img { display: block; max-width: 100%; }
     linear-gradient(0deg, var(--spore) 0%, transparent 38%);
   pointer-events: none;
 }
-.hero .wrap { padding-block: 120px clamp(28px, 5vh, 56px); }
+.hero .wrap { padding-block: 120px clamp(18px, 3vh, 36px); }
 
 .title { margin: 0; line-height: 0; }
 .wordmark {
   display: block;
-  width: min(88%, 680px);
+  width: min(86%, 560px);
   height: auto;
   overflow: visible;
   /* IM30-cover aqua with a soft glow; the dark shadow keeps it legible over the bright scene */
