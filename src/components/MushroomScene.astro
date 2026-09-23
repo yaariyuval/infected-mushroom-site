@@ -1,5 +1,5 @@
 ---
-// Hero backdrop: a bioluminescent mushroom grove (see src/scripts/grove.ts).
+// Hero backdrop: the IM30 cover brought to life (see src/scripts/im30-fable.ts).
 // Three.js loads after the page is interactive; until then (or without WebGL) the hero shows a CSS gradient.
 ---
 <canvas id="grove" aria-hidden="true"></canvas>
@@ -25,7 +25,7 @@
   }
 
   function boot() {
-    import('../scripts/grove')
+    import('../scripts/im30-fable')
       .then(({ start }) => {
         const handle = start(canvas, { still, onFirstFrame: () => hero.classList.add('is-lit') });
         canvas.addEventListener('webglcontextlost', (e) => {
