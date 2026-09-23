@@ -218,9 +218,10 @@ img { display: block; max-width: 100%; }
   width: min(92%, 780px);
   height: auto;
   overflow: visible;
-  filter: drop-shadow(0 10px 40px rgb(12 9 32 / 0.55));
+  /* IM30-cover aqua with a soft glow; the dark shadow keeps it legible over the bright scene */
+  filter: drop-shadow(0 0 18px rgb(98 249 252 / 0.35)) drop-shadow(0 8px 30px rgb(12 9 32 / 0.7));
 }
-.wordmark .wm-shadow { fill: var(--glo); }
+.wordmark .wm-fill { fill: #62f9fc; }
 
 .hero-meta {
   display: flex;
