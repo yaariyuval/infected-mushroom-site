@@ -237,54 +237,132 @@ function makePortal() {
 
 /* ----------------------------------------------- mushrooms crowning the arch */
 
-// The cover's big mushrooms are trumpets: a wavy pink flared rim over a glowing, fluted cyan funnel
-// that runs straight down into the stem (no separate cap and gills).
-function makeTrumpet(seed: number, pulse: { value: number }) {
+// The cover's big mushrooms are trumpets: a thick, glossy, wavy hot-pink cap and rim over a
+// dark-blue fluted funnel streaked with cyan, running straight down into a glowing stem.
+// Animated: the rim flutters, light pulses run up the flutes on the beat, spores stream off the rim.
+const trumpetTime = { value: 0 }, trumpetKick = { value: 0 };
+
+function makeTrumpet(seed: number) {
   const prof = [
     [0.2, -0.4], [0.2, 0], [0.22, 0.35], [0.28, 0.65], [0.42, 0.92], [0.66, 1.12], [0.98, 1.27], [1.3, 1.36],
-    [1.55, 1.4], [1.66, 1.44], [1.64, 1.5], [1.5, 1.54], [1.15, 1.56], [0.7, 1.52], [0.3, 1.47], [0.001, 1.46],
+    [1.55, 1.4], [1.7, 1.46], [1.74, 1.54], [1.66, 1.62], [1.45, 1.63], [1.1, 1.62], [0.7, 1.57], [0.3, 1.52], [0.001, 1.5],
   ].map(([x, y]) => new THREE.Vector2(x, y));
-  const UNDER = 9; // points before this index are the glowing underside
-  let geo: THREE.BufferGeometry = new THREE.LatheGeometry(prof, 128);
+  const UNDER = 9;
+  const geo = new THREE.LatheGeometry(prof, 144);
   const p = geo.attributes.position as THREE.BufferAttribute;
-  const glow = new Float32Array(p.count), col = new Float32Array(p.count * 3);
-  const rows = prof.length, segs = 129;
+  const glow = new Float32Array(p.count), col = new Float32Array(p.count * 3), height = new Float32Array(p.count), rim = new Float32Array(p.count);
+  const rows = prof.length;
   const pn = (a: number, f: number, sd: number) => noise3(Math.cos(a) * f + sd * 7.3, Math.sin(a) * f, sd * 3.1) * 2 - 1;
-  const c = new THREE.Color();
+  const c = new THREE.Color(), hot = new THREE.Color(1, 0.12, 0.5), pale = new THREE.Color(1, 0.55, 0.82), deepPink = new THREE.Color(0.6, 0.03, 0.3);
+  const navy = new THREE.Color(0.005, 0.015, 0.16), streak = new THREE.Color(0.03, 0.3, 0.8);
   for (let i = 0; i < p.count; i++) {
-    const row = i % rows; void segs;
+    const row = i % rows;
     let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
     const rho = Math.hypot(x, z), a = Math.atan2(z, x);
-    // irregular flare and a wavy, drooping margin
-    const flare = 1 + 0.08 * pn(a, 1.4, seed) * smooth(0.5, 1.6, rho);
+    const flare = 1 + 0.09 * pn(a, 1.4, seed) * smooth(0.5, 1.7, rho);
     x *= flare; z *= flare;
-    y += smooth(0.9, 1.66, rho) * (0.14 * pn(a, 2.2, seed + 2) - 0.05);
+    y += smooth(0.9, 1.74, rho) * (0.16 * pn(a, 2.3, seed + 2) - 0.04);
     p.setXYZ(i, x, y, z);
+    height[i] = THREE.MathUtils.clamp((y + 0.4) / 2, 0, 1);
+    rim[i] = smooth(1.1, 1.74, rho);
     if (row < UNDER) {
-      // fluted funnel: bright ribs running down into the stem
-      const rib = Math.pow(0.5 + 0.5 * Math.sin(a * 26 + Math.sin(y * 3 + seed) * 1.2), 2.2);
-      const k = smooth(-0.3, 0.6, y) * (0.35 + 0.65 * rib);
-      glow[i] = k * 0.75;
-      c.setRGB(0.04, 0.14, 0.55).lerp(new THREE.Color(0.2, 0.55, 1), rib * 0.5);
+      // thin cyan streaks on dark blue, brightening toward the throat of the funnel
+      const s1 = Math.pow(0.5 + 0.5 * Math.sin(a * 34 + Math.sin(y * 3 + seed) * 1.5), 6);
+      const s2 = Math.pow(0.5 + 0.5 * Math.sin(a * 71 + seed), 10) * 0.6;
+      const throat = 1 - smooth(0.3, 1.35, rho);
+      const k = Math.min(1, (s1 + s2) * (0.5 + 0.5 * throat) + throat * 0.35);
+      glow[i] = k;
+      c.copy(navy).lerp(streak, k * 0.7);
     } else {
       glow[i] = 0;
-      const rim = smooth(1.0, 1.66, rho);
-      c.setRGB(0.78, 0.07, 0.36).lerp(new THREE.Color(1, 0.35, 0.68), rim * 0.7 + 0.2 * noise3(x * 3, y * 3, z * 3));
+      // glossy hot pink: pale where the rim rolls over, deeper toward the centre, painterly mottling
+      const roll = smooth(1.35, 1.74, rho) * (1 - smooth(1.6, 1.66, y));
+      c.copy(deepPink).lerp(hot, smooth(0.1, 1.2, rho)).lerp(pale, roll * 0.75 + 0.15 * noise3(x * 2.5, y * 2.5, z * 2.5));
     }
     col.set([c.r, c.g, c.b], i * 3);
   }
   geo.setAttribute('aGlow', new THREE.BufferAttribute(glow, 1));
+  geo.setAttribute('aHeight', new THREE.BufferAttribute(height, 1));
+  geo.setAttribute('aRim', new THREE.BufferAttribute(rim, 1));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   geo.computeVertexNormals();
-  const mat = withGlow(
-    new THREE.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.45, clearcoat: 0.5, clearcoatRoughness: 0.35, side: THREE.DoubleSide }),
-    new THREE.Color(0.05, 0.62, 1.0), pulse,
-  );
+
+  const mat = new THREE.MeshPhysicalMaterial({
+    color: 0xffffff, vertexColors: true, roughness: 0.4, clearcoat: 0.55, clearcoatRoughness: 0.25,
+    side: THREE.DoubleSide, envMapIntensity: 0.3,
+  });
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uT = trumpetTime;
+    sh.uniforms.uKick = trumpetKick;
+    sh.uniforms.uSeed = { value: seed };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aGlow; attribute float aHeight; attribute float aRim;\nuniform float uT, uKick, uSeed;\nvarying float vGlow; varying float vHeight;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        vGlow = aGlow; vHeight = aHeight;
+        {
+          // the rim flutters like soft tissue, and the whole cap breathes on the beat
+          float ang = atan(transformed.z, transformed.x);
+          transformed.y += aRim * (.07 * sin(ang * 5. + uT * 1.6 + uSeed) + .04 * sin(ang * 9. - uT * 2.3 + uSeed * 2.));
+          transformed.xz *= 1. + aRim * .035 * uKick;
+        }`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uT, uKick;\nvarying float vGlow; varying float vHeight;')
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        {
+          // light running up the flutes from the stem to the rim, one pulse per beat
+          float run = pow(fract(vHeight * 1.3 - uT * 145. / 60. * .5), 5.);
+          float under = step(.001, vGlow);
+          totalEmissiveRadiance += vec3(.02, .4, 1.) * vGlow * (.55 + 1.2 * run + .25 * uKick) + vec3(0., .02, .14) * under + vec3(.16, 0., .07) * (1. - under);
+        }`);
+  };
   const m = new THREE.Mesh(geo, mat);
+
+  // sparkles on the underside, and spores streaming off the rim
+  const N = 90;
+  const sp = new Float32Array(N * 3), sd = new Float32Array(N);
+  for (let i = 0; i < N; i++) { sd[i] = Math.random(); }
+  const sg = new THREE.BufferGeometry();
+  sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+  sg.setAttribute('aSeed', new THREE.BufferAttribute(sd, 1));
+  const sm = new THREE.ShaderMaterial({
+    uniforms: { uT: trumpetTime, uSize: { value: 30 } },
+    vertexShader: `
+      attribute float aSeed; uniform float uT, uSize; varying float vA; varying float vKind;
+      void main() {
+        float a = aSeed * 6.2832 * 7.;
+        vec3 p;
+        if (aSeed < .45) {
+          // sparkle clinging to the fluted underside
+          float r = mix(.35, 1.45, fract(aSeed * 13.));
+          p = vec3(cos(a) * r, mix(.55, 1.36, (r - .35) / 1.1) - .02, sin(a) * r);
+          vA = pow(.5 + .5 * sin(uT * 3. + aSeed * 90.), 8.);
+          vKind = 0.;
+        } else {
+          // spore drifting up off the rim
+          float k = fract(aSeed * 5.3 + uT * (.08 + .05 * fract(aSeed * 3.1)));
+          p = vec3(cos(a) * 1.7, 1.55, sin(a) * 1.7) * vec3(1. + k * .6, 1., 1. + k * .6) + vec3(0., k * 2.4, 0.);
+          p.x += sin(uT * .7 + aSeed * 20.) * .2 * k;
+          vA = smoothstep(0., .1, k) * smoothstep(1., .6, k);
+          vKind = 1.;
+        }
+        vec4 mv = modelViewMatrix * vec4(p, 1.);
+        gl_Position = projectionMatrix * mv;
+        gl_PointSize = uSize * (vKind > .5 ? 1. : .6) * (.5 + fract(aSeed * 17.)) / -mv.z;
+      }`,
+    fragmentShader: `varying float vA; varying float vKind;
+      void main(){ float d = length(gl_PointCoord - .5); float a = smoothstep(.5, 0., d);
+        vec3 c = vKind > .5 ? vec3(1., .5, .85) : vec3(.9, 1.2, 1.4);
+        gl_FragColor = vec4(c * a * a * vA * 1.3, 1.); }`,
+    blending: THREE.AdditiveBlending, transparent: true, depthWrite: false,
+  });
+  const motes = new THREE.Points(sg, sm);
+  motes.frustumCulled = false;
+
   const g = new THREE.Group();
-  g.add(m);
+  g.add(m, motes);
   g.userData.seed = seed;
   g.userData.cap = m;
+  g.userData.motes = sm;
   return g;
 }
 
@@ -302,7 +380,7 @@ function crownArch(parent: THREE.Group, pulse: { value: number }) {
     { deg: 122, s: 0.95, lean: 0.55 }, { deg: 150, s: 0.6, lean: 0.25 },
     { deg: 58, s: 0.78, lean: 0.4 }, { deg: 28, s: 0.62, lean: 0.2 },
   ].forEach((d, i) => {
-    const t = makeTrumpet(60 + i, pulse);
+    const t = makeTrumpet(60 + i);
     t.scale.setScalar(d.s);
     place(t, d.deg, 0.45, d.lean);
   });
@@ -365,21 +443,24 @@ const EYE_FRAG = `
   uniform vec2 uLook; uniform float uBlink; varying vec2 vUv;
   void main() {
     vec2 p = (vUv - .5) * 2.;
-    float h = .58 * pow(max(1. - p.x * p.x, 0.), .8) * (1. - uBlink);
-    float edge = h - abs(p.y + uBlink * .25);
-    float alpha = smoothstep(-.1, -.06, edge);
+    // pointed almond: upper lid fuller than the lower
+    float x2 = min(p.x * p.x, 1.);
+    float up = .62 * pow(1. - x2, .9) * (1. - uBlink);
+    float lo = .46 * pow(1. - x2, 1.1);
+    float edge = min(up - p.y, p.y + lo);
+    float alpha = smoothstep(-.14, -.1, edge);
     if (alpha <= 0.) discard;
-    vec2 ip = p - uLook * vec2(.38, .16);
-    float ir = length(ip);
-    vec3 col = mix(vec3(.5, .55, .78), vec3(.82, .84, .9), smoothstep(0., .35, edge));
-    vec3 irisC = mix(vec3(.08, .22, .9), vec3(.3, .55, 1.), smoothstep(.12, .42, ir));
-    col = mix(col, irisC, smoothstep(.44, .41, ir));
-    col = mix(col, vec3(.05, .08, .35), smoothstep(.02, 0., abs(ir - .43)));
-    col = mix(col, vec3(.42, .04, .1), smoothstep(.17, .14, ir));
-    col = mix(col, vec3(1.1), smoothstep(.075, .05, length(ip - vec2(-.12, .12))));
-    col = mix(vec3(.3, .03, .18), col, smoothstep(0., .07, edge));
-    col = mix(col, vec3(.15, .3, 1.), smoothstep(.07, 0., edge) * smoothstep(.55, .95, abs(p.x)));
-    gl_FragColor = vec4(col, alpha);
+    vec2 ip = p - uLook * vec2(.34, .12) - vec2(0., .04);
+    float ir = length(ip * vec2(1., .95));
+    vec3 col = mix(vec3(.62, .7, 1.), vec3(.93, .95, 1.), smoothstep(0., .3, edge));   // sclera, blue in the shadow of the lids
+    vec3 irisC = mix(vec3(.05, .16, .75), vec3(.35, .62, 1.), smoothstep(.1, .5, ir));
+    col = mix(col, irisC, smoothstep(.54, .5, ir));
+    col = mix(col, vec3(.03, .05, .3), smoothstep(.03, 0., abs(ir - .53)));
+    col = mix(col, vec3(.45, .05, .12), smoothstep(.2, .17, ir));                       // maroon pupil
+    col = mix(col, vec3(1.15), smoothstep(.09, .06, length(ip - vec2(-.16, .16))));   // glint
+    col = mix(vec3(.16, .02, .12), col, smoothstep(0., .1, edge));                      // thick dark lid line
+    col = mix(col, vec3(.2, .35, 1.), smoothstep(.1, 0., edge) * step(p.y, 0.) * .6);  // blue lower lash line
+    gl_FragColor = vec4(col * .9, alpha);
   }`;
 
 function makeEyeDecal(width: number, height: number, eyes: Eye[], rand: () => number, lid = 0) {
@@ -439,7 +520,7 @@ function makeFinger(curve: THREE.CatmullRomCurve3, R: number, skin: THREE.Materi
 }
 
 // Place an almond eye flat on a finger's surface at curve position t, facing `toward`.
-function eyeOnFinger(curve: THREE.CatmullRomCurve3, t: number, r: number, toward: THREE.Vector3, size: number, eyes: Eye[], rand: () => number, lid = 0) {
+function eyeOnFinger(curve: THREE.CatmullRomCurve3, t: number, r: number, toward: THREE.Vector3, size: number, eyes: Eye[], rand: () => number, lid = 0, tilt = 0) {
   const pos = curve.getPointAt(t), tan = curve.getTangentAt(t);
   if (tan.x > 0) tan.negate(); // keep the eye's long axis reading left-to-right consistently
   const out = toward.clone().addScaledVector(tan, -tan.dot(toward)).normalize();
@@ -447,6 +528,7 @@ function eyeOnFinger(curve: THREE.CatmullRomCurve3, t: number, r: number, toward
   const e = makeEyeDecal(r * 2.4 * size, r * 1.2 * size, eyes, rand, lid);
   e.position.copy(pos).addScaledVector(out, r * 1.1);
   e.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(tan.clone().negate(), bi.negate(), out));
+  e.rotateZ(tilt);
   return e;
 }
 
@@ -466,7 +548,7 @@ function makeTalons(side: 1 | -1, scale: number, n: number, seed: number, eyes: 
   const group = new THREE.Group();
   group.position.copy(PORTAL);
   const skin = skinMaterial();
-  const toward = new THREE.Vector3(-side * 0.1, 0.45, 1).normalize();
+  const toward = new THREE.Vector3(Math.sin(-TURN) - side * 0.1, 0.45, Math.cos(-TURN)).normalize();
   const flex: Flexer[] = [];
   const mid = (n - 1) / 2;
   let lowest: { curve: THREE.CatmullRomCurve3; g: THREE.Group; R: number } | null = null;
@@ -515,6 +597,50 @@ function makeTalons(side: 1 | -1, scale: number, n: number, seed: number, eyes: 
   function update(t: number) {
     flex.forEach((f) => { f.g.rotation.z = side * f.amp * (0.5 + 0.5 * Math.sin(t * 0.7 + f.phase)); f.g.rotation.y = 0.03 * Math.sin(t * 0.5 + f.phase); });
     drips.forEach((d) => { d.scale.y = 1 + 0.25 * Math.sin(t * 0.9 + d.userData.phase); });
+  }
+  return { group, update };
+}
+
+
+// The big hand on the right of the cover: fat, overlapping fingers that bend sharply down at the knuckle
+// into rounded tips, with eyes of different sizes near the fingertips and back on the knuckles.
+function makeFist(scale: number, seed: number, eyes: Eye[]) {
+  const rand = rng(seed);
+  const group = new THREE.Group();
+  group.position.copy(PORTAL);
+  const skin = skinMaterial();
+  const toward = new THREE.Vector3(Math.sin(-TURN), 0.5, Math.cos(-TURN)).normalize();
+  const flex: Flexer[] = [];
+  const ys = [1.05, 0.38, -0.3, -0.98];
+  ys.forEach((yy, i) => {
+    const y = yy * scale;
+    const R = 0.44 * scale * (i === 3 ? 0.88 : 1);
+    const bend = lerp(0.75, 1.0, rand());
+    const tipIn = lerp(0.3, 0.6, rand()) + (i === 0 ? -0.15 : 0);
+    const X = RING_R;
+    const z0 = 0.95 - i * 0.05;
+    const pts = [
+      [X + 3.1, y + 0.25, 0.1], [X + 2.1, y + 0.2, z0 - 0.2], [X + 1.1, y + 0.12, z0],
+      [X + 0.25, y + 0.02, z0 + 0.08], [X - tipIn * 0.6, y - 0.35 * bend, z0 + 0.02], [X - tipIn, y - 0.85 * bend, z0 - 0.12],
+    ].map(([x, yv, z]) => new THREE.Vector3(x, yv, z));
+    const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+    const profile = (t: number) => {
+      const knuckles = 0.1 * Math.exp(-Math.pow((t - 0.42) / 0.07, 2)) + 0.12 * Math.exp(-Math.pow((t - 0.66) / 0.06, 2));
+      const tip = t > 0.9 ? Math.sqrt(Math.max(0, 1 - Math.pow((t - 0.9) / 0.1, 2))) : 1;
+      const base = t < 0.05 ? Math.sqrt(t / 0.05) : 1; // rounded, not an open tube end
+      return (1 - 0.18 * smooth(0.5, 1, t) + knuckles) * tip * base;
+    };
+    const g = new THREE.Group();
+    g.add(makeFinger(curve, R, skin, profile, [0.93, 1.0]));
+    // a big eye near the fingertip on most fingers, smaller ones back on the knuckles
+    if (i !== 1) g.add(eyeOnFinger(curve, lerp(0.8, 0.86, rand()), R * profile(0.83), toward, lerp(1.15, 1.45, rand()), eyes, rand, rand() > 0.6 ? 0.25 : 0, (rand() - 0.5) * 0.5));
+    if (i === 1 || i === 2) g.add(eyeOnFinger(curve, lerp(0.5, 0.56, rand()), R * profile(0.53), toward, lerp(1.2, 1.4, rand()), eyes, rand, 0, (rand() - 0.5) * 0.3));
+    if (i === 0 || i === 3) g.add(eyeOnFinger(curve, lerp(0.3, 0.36, rand()), R * profile(0.33), toward, lerp(0.8, 1.0, rand()), eyes, rand, 0.3, (rand() - 0.5) * 0.4));
+    group.add(g);
+    flex.push({ g, phase: rand() * 6, amp: 0.035 });
+  });
+  function update(t: number) {
+    flex.forEach((f) => { f.g.rotation.z = f.amp * Math.sin(t * 0.6 + f.phase); f.g.position.x = 0.03 * Math.sin(t * 0.8 + f.phase); });
   }
   return { group, update };
 }
@@ -662,7 +788,21 @@ function makeForest() {
   const group = new THREE.Group();
   const trunkMat = new THREE.MeshStandardMaterial({ color: 0x2a1c6a, roughness: 0.8, emissive: 0x0a0624 });
   const capMat = new THREE.MeshStandardMaterial({ color: 0xc41d6e, roughness: 0.5, emissive: 0x3a0426, side: THREE.DoubleSide });
-  const spots: { pos: THREE.Vector3; r: number }[] = [];
+  const spots: { top: THREE.Vector3; hang: number; r: number; phase: number }[] = [];
+  const loopPos: number[] = [];
+  const gillMat = new THREE.ShaderMaterial({
+    uniforms: { uT: { value: 0 } },
+    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
+    fragmentShader: `uniform float uT; varying vec2 vUv;
+      void main() {
+        vec2 p = vUv - .5; float r = length(p) * 2.; float a = atan(p.y, p.x);
+        float gill = pow(.5 + .5 * sin(a * 60.), 3.);
+        vec3 c = mix(vec3(.01, .03, .2), vec3(.1, .7, 1.1), gill * smoothstep(.15, .9, r));
+        c *= .7 + .3 * sin(uT * 1.5 + r * 6.);
+        gl_FragColor = vec4(c, 1.);
+      }`,
+    side: THREE.DoubleSide,
+  });
   const trees: THREE.Group[] = [];
   const places = [
     [-7.5, -4], [-11, -9], [-5.5, -12], [7.8, -4.5], [11.5, -9], [5.5, -13], [-15, -3], [15, -2.5], [0, -16], [-9, 1.5], [9.5, 2],
@@ -690,31 +830,67 @@ function makeForest() {
     t.userData.phase = rand() * 6;
     group.add(t);
     trees.push(t);
-    // glowing drops hanging under the cap
-    const nDrops = Math.round(lerp(14, 26, rand()));
+    // glowing gills on the underside of the cap
+    const gills = new THREE.Mesh(new THREE.CircleGeometry(cr * 0.98, 48), gillMat);
+    gills.rotation.x = Math.PI / 2;
+    gills.position.set(bend, h - 0.005, 0);
+    t.add(gills);
+    // drops hang from the gills on short threads, with a few drooping loops between them
+    const nDrops = Math.round(lerp(18, 30, rand()));
+    const under: THREE.Vector3[] = [];
     for (let i = 0; i < nDrops; i++) {
-      const a = rand() * Math.PI * 2, rr = Math.sqrt(rand()) * cr * 0.9;
-      const hang = lerp(0.3, 1.4, rand());
-      spots.push({ pos: new THREE.Vector3(x + bend + Math.cos(a) * rr, h - hang, z + Math.sin(a) * rr), r: lerp(0.06, 0.12, rand()) });
+      const a = rand() * Math.PI * 2, rr = lerp(0.25, 0.95, Math.sqrt(rand())) * cr;
+      const top = new THREE.Vector3(x + bend * Math.cos(t.rotation.y) + Math.cos(a) * rr, h - 0.01, z - bend * Math.sin(t.rotation.y) + Math.sin(a) * rr);
+      under.push(top);
+      spots.push({ top, hang: lerp(0.12, 0.9, Math.pow(rand(), 1.3)), r: lerp(0.05, 0.11, rand()), phase: rand() * 6 });
+    }
+    for (let k = 0; k < 4; k++) {
+      const A = under[Math.floor(rand() * under.length)], B = under[Math.floor(rand() * under.length)];
+      if (A.distanceTo(B) < 0.4) continue;
+      const sag = lerp(0.3, 0.8, rand());
+      const N = 12;
+      for (let j = 0; j < N; j++) {
+        const u0 = j / N, u1 = (j + 1) / N;
+        const p0 = A.clone().lerp(B, u0).add(new THREE.Vector3(0, -sag * 4 * u0 * (1 - u0), 0));
+        const p1 = A.clone().lerp(B, u1).add(new THREE.Vector3(0, -sag * 4 * u1 * (1 - u1), 0));
+        loopPos.push(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z);
+      }
     }
   }
-  const dropGeo = new THREE.SphereGeometry(1, 10, 8);
+  const dropGeo = new THREE.SphereGeometry(1, 12, 10);
   dropGeo.scale(0.6, 1.5, 0.6);
-  const drops = new THREE.InstancedMesh(dropGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color(0.35, 1.3, 1.6) }), spots.length);
-  const threadPos: number[] = [];
-  const m = new THREE.Matrix4();
-  spots.forEach((s, i) => {
-    m.makeScale(s.r, s.r, s.r).setPosition(s.pos);
-    drops.setMatrixAt(i, m);
-    threadPos.push(s.pos.x, s.pos.y, s.pos.z, s.pos.x, s.pos.y + 1.6, s.pos.z);
-  });
-  const threads = new THREE.LineSegments(
-    new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(threadPos, 3)),
-    new THREE.LineBasicMaterial({ color: new THREE.Color(0.2, 0.6, 0.8), transparent: true, opacity: 0.35 }),
+  dropGeo.translate(0, -1.2, 0); // hang from the top of the drop
+  const drops = new THREE.InstancedMesh(dropGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }), spots.length);
+  const threadGeo = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(spots.length * 6), 3));
+  const threads = new THREE.LineSegments(threadGeo, new THREE.LineBasicMaterial({ color: new THREE.Color(0.25, 0.7, 0.9), transparent: true, opacity: 0.5 }));
+  threads.frustumCulled = false;
+  const loops = new THREE.LineSegments(
+    new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(loopPos, 3)),
+    new THREE.LineBasicMaterial({ color: new THREE.Color(0.35, 0.8, 1), transparent: true, opacity: 0.45 }),
   );
-  group.add(drops, threads);
+  group.add(drops, threads, loops);
+  const m = new THREE.Matrix4(), tip = new THREE.Vector3(), col = new THREE.Color();
+  function place(t: number) {
+    const tp = threadGeo.attributes.position as THREE.BufferAttribute;
+    spots.forEach((s, i) => {
+      // each drop swings gently on its thread and twinkles
+      const sw = Math.sin(t * 1.1 + s.phase) * 0.12, sw2 = Math.cos(t * 0.8 + s.phase * 1.7) * 0.08;
+      tip.copy(s.top).add(new THREE.Vector3(sw * s.hang, -s.hang, sw2 * s.hang));
+      m.makeScale(s.r, s.r, s.r).setPosition(tip.x, tip.y + s.r * 1.2, tip.z);
+      drops.setMatrixAt(i, m);
+      col.setRGB(0.3, 1.1, 1.45).multiplyScalar(0.75 + 0.35 * Math.sin(t * 2.2 + s.phase * 3));
+      drops.setColorAt(i, col);
+      tp.setXYZ(i * 2, s.top.x, s.top.y, s.top.z);
+      tp.setXYZ(i * 2 + 1, tip.x, tip.y + s.r * 0.2, tip.z);
+    });
+    drops.instanceMatrix.needsUpdate = true;
+    drops.instanceColor!.needsUpdate = true;
+    tp.needsUpdate = true;
+  }
+  place(0);
   function update(t: number) {
-    trees.forEach((tr) => { tr.rotation.z = 0.012 * Math.sin(t * 0.4 + tr.userData.phase); });
+    gillMat.uniforms.uT.value = t;
+    place(t);
   }
   return { group, update };
 }
@@ -804,8 +980,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
 
   const eyes: Eye[] = [];
   const left = makeTalons(-1, 0.9, 4, 3, eyes, 0.3, 1.45);
-  const right = makeTalons(1, 1.1, 5, 8, eyes, 0, 1.25);
-  right.group.position.y -= 0.1;
+  const right = makeFist(1.0, 8, eyes);
   rig.add(left.group, right.group);
 
   const figs = [makeFigure(), makeFigure()];
@@ -873,13 +1048,23 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     (backdrop.material as THREE.ShaderMaterial).uniforms.uT.value = t;
 
     pulse.value = 0.8 + 0.4 * kick;
+    trumpetTime.value = t;
+    trumpetKick.value = kick;
     portal.update(t, kick);
     portal.group.children.forEach((c) => {
       if (c.userData.seed) {
         const s = c.userData.seed as number;
-        (c.userData.cap as THREE.Object3D).scale.setScalar(1 + 0.025 * Math.sin(t * 0.9 + s));
         const gm = c.userData.gills as THREE.MeshBasicMaterial | undefined;
-        gm?.color.setScalar(0.85 + 0.4 * kick);
+        if (gm) {
+          // little spotted ones bounce on the kick, alternating
+          const hop = s % 2 ? kick : Math.exp(-((((t * BPM) / 60 + 0.5) % 1) * 5));
+          (c.userData.cap as THREE.Object3D).scale.set(1 + 0.05 * hop, 1 - 0.07 * hop, 1 + 0.05 * hop);
+          gm.color.setScalar(0.85 + 0.5 * hop);
+        } else {
+          (c.userData.cap as THREE.Object3D).scale.setScalar(1 + 0.02 * Math.sin(t * 0.9 + s));
+        }
+        const motes = c.userData.motes as THREE.ShaderMaterial | undefined;
+        if (motes) motes.uniforms.uSize.value = 34 * renderer.getPixelRatio() * (canvas.clientHeight / 800);
       }
     });
     roots.update(t);
