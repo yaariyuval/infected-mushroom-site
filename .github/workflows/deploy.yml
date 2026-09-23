@@ -2,7 +2,8 @@ name: Deploy site
 
 on:
   push:
-    branches: [main]
+    # main is the live site; the other branches are built as previews under /preview-<branch>/
+    branches: [main, hero-im30]
   # Rebuild every morning so past shows drop off the list.
   schedule:
     - cron: '0 4 * * *'
@@ -22,6 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -33,6 +36,18 @@ jobs:
         env:
           SITE_URL: ${{ steps.pages.outputs.origin }}
           BASE_PATH: ${{ steps.pages.outputs.base_path }}
+      - name: Build branch previews
+        env:
+          SITE_URL: ${{ steps.pages.outputs.origin }}
+          PUBLIC_NOINDEX: '1'
+        run: |
+          for b in hero-im30; do
+            if git fetch --depth 1 origin "$b" 2>/dev/null; then
+              git worktree add "/tmp/$b" FETCH_HEAD
+              (cd "/tmp/$b" && npm ci && BASE_PATH="${{ steps.pages.outputs.base_path }}/preview-$b" npm run build)
+              cp -r "/tmp/$b/dist" "dist/preview-$b"
+            fi
+          done
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
