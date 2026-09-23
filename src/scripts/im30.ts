@@ -378,7 +378,7 @@ function crownArch(parent: THREE.Group, pulse: { value: number }) {
   // big trumpets, like the cover: a large one top-left, others down the right side
   [
     { deg: 122, s: 0.95, lean: 0.55 }, { deg: 150, s: 0.6, lean: 0.25 },
-    { deg: 58, s: 0.78, lean: 0.4 }, { deg: 28, s: 0.62, lean: 0.2 },
+    { deg: 62, s: 0.78, lean: 0.4 }, { deg: 40, s: 0.55, lean: 0.5 },
   ].forEach((d, i) => {
     const t = makeTrumpet(60 + i);
     t.scale.setScalar(d.s);
@@ -804,83 +804,176 @@ function makeChains(figures: THREE.Group[], rig: THREE.Object3D) {
 
 /* ---------------------------------------- the forest of dripping mushroom trees */
 
-function makeForest() {
-  // Background trees as on the cover: a flat mauve cap with a cyan rim line, an inverted cone
-  // underneath dotted with glowing almond-shaped spots, and pale strands drooping from the rim.
+type CapKind = 'amanita' | 'parasol' | 'wavy' | 'liberty' | 'funnel';
+
+// Background mushroom: one lathe for the cap (top surface + gill underside) and one for the stem.
+// The gills are drawn in the shader (cheap), the cap has a drifting thin-film rainbow sheen.
+function makeBgShroom(kind: CapKind, seed: number, capC: THREE.ColorRepresentation, gillC: THREE.Color, time: { value: number }, kick: { value: number }) {
+  const rand = rng(seed);
+  const g = new THREE.Group();
+  const r = kind === 'liberty' ? 0.75 : kind === 'parasol' ? 1.35 : 1.05;
+  const H = kind === 'liberty' ? 2.6 : kind === 'parasol' ? 2.9 : lerp(1.9, 2.5, rand());
+  const bend = (rand() - 0.5) * 0.5;
+  // top profile y(u), u = rho / r in [0,1]
+  const top = (u: number) => {
+    switch (kind) {
+      case 'amanita': return 0.5 * r * Math.pow(Math.max(0, 1 - u * u), 0.6) - 0.08 * r * smooth(0.7, 1, u);
+      case 'parasol': return 0.18 * r * (1 - u * u) + 0.12 * r * Math.exp(-u * u * 30) - 0.06 * r * smooth(0.8, 1, u);
+      case 'wavy': return 0.12 * r * (1 - u) + 0.22 * r * smooth(0.45, 1, u) * u; // rim turns up
+      case 'liberty': return 0.95 * r * Math.pow(Math.max(0, 1 - Math.pow(u, 1.8)), 0.75) + 0.1 * r * Math.exp(-u * u * 50) - 0.12 * r * smooth(0.75, 1, u);
+      case 'funnel': return 0.05 * r - 0.25 * r * (1 - u) * (1 - u) + 0.28 * r * smooth(0.5, 1, u);
+    }
+  };
+  const thick = kind === 'liberty' ? 0.08 : 0.07;
+  const N = 28;
+  const pts: THREE.Vector2[] = [];
+  const stemR = r * (kind === 'liberty' ? 0.1 : 0.13);
+  // underside first (from stem out to the rim), then over the rim, then the top back to the centre
+  for (let i = 0; i <= N; i++) { const u = lerp(stemR / r, 1, i / N); pts.push(new THREE.Vector2(u * r, top(u) - thick * r * (1.4 - 0.9 * u) - (kind === 'liberty' ? 0.25 * r * (1 - u) : 0))); }
+  for (let i = N; i >= 0; i--) { const u = Math.max(0.001, i / N); pts.push(new THREE.Vector2(u * r, top(u))); }
+  const geo = new THREE.LatheGeometry(pts, 72);
+  const p = geo.attributes.position as THREE.BufferAttribute;
+  const under = new Float32Array(p.count);
+  const cols = 72 + 1, rows = pts.length;
+  const wav = kind === 'wavy' ? 0.16 : kind === 'funnel' ? 0.12 : kind === 'parasol' ? 0.05 : 0.025;
+  const nWaves = kind === 'wavy' ? 7 : kind === 'funnel' ? 5 : 9;
+  for (let i = 0; i < p.count; i++) {
+    const row = i % rows;
+    let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const rho = Math.hypot(x, z), a = Math.atan2(z, x);
+    const u = rho / r;
+    // wavy, irregular margin; lumpy surface
+    const w = Math.sin(a * nWaves + seed) * 0.7 + (noise3(Math.cos(a) * 2 + seed, Math.sin(a) * 2, 1) - 0.5) * 1.2;
+    y += wav * r * w * smooth(0.35, 1, u);
+    const lump = (noise3(x * 2.2 + seed, y * 2.2, z * 2.2) - 0.5) * 0.06 * r;
+    x *= 1 + lump; z *= 1 + lump;
+    p.setXYZ(i, x, y, z);
+    under[i] = row <= N ? 1 : 0;
+  }
+  void cols;
+  geo.setAttribute('aUnder', new THREE.BufferAttribute(under, 1));
+  geo.computeVertexNormals();
+
+  const cap = new THREE.MeshStandardMaterial({ color: capC, roughness: 0.42, metalness: 0.05, side: THREE.DoubleSide, envMapIntensity: 0.5 });
+  const spots = kind === 'amanita' ? 1 : 0;
+  cap.onBeforeCompile = (sh) => {
+    sh.uniforms.uT = time; sh.uniforms.uKick = kick;
+    sh.uniforms.uGill = { value: gillC };
+    sh.uniforms.uSeed = { value: seed };
+    sh.uniforms.uR = { value: r };
+    sh.uniforms.uSpots = { value: spots };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aUnder; varying float vUnder; varying vec3 vObj;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvUnder = aUnder; vObj = position;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>\nuniform float uT, uKick, uSeed, uR, uSpots; uniform vec3 uGill; varying float vUnder; varying vec3 vObj;\n${NOISE_GLSL}`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        float rhoN = length(vObj.xz) / uR;
+        float ang = atan(vObj.z, vObj.x);
+        if (vUnder > .5) diffuseColor.rgb = uGill * .15;
+        else {
+          diffuseColor.rgb *= (.55 + .6 * smoothstep(.1, 1., rhoN) + .15 * n2(vObj.xz * 5. + uSeed)) * (.9 + .1 * sin(ang * 90. + n2(vec2(ang * 8., rhoN * 3.)) * 4.) * smoothstep(.4, 1., rhoN));
+          float sp = smoothstep(.62, .67, n2(vec2(ang * 5., rhoN * 9.) + uSeed)) * uSpots;
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.95, .92, 1.), sp * smoothstep(.97, .75, rhoN));
+        }`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        if (vUnder > .5) {
+          // radiating gills, brightest toward the stem, with a pulse running outward on the beat
+          float gp = ang * 44. + sin(rhoN * 9. + uSeed) * .6;
+          float gw = fwidth(gp);
+          float gill = smoothstep(.2 + gw, .2 - gw, abs(fract(gp / 6.2832) - .5) - .3) * smoothstep(1.2, .3, gw);
+          float run = pow(fract(rhoN * .9 - uT * 145. / 60. * .5), 6.);
+          totalEmissiveRadiance += uGill * (.25 + gill * (.55 + .8 * run + .3 * uKick)) * (1.2 - .6 * rhoN);
+        } else {
+          // thin-film sheen: rainbow bands that slide with view angle and time
+          float fres = pow(1. - abs(dot(normalize(vNormal), normalize(vViewPosition))), 2.);
+          vec3 film = .5 + .5 * cos(6.2832 * (fres * 1.6 + rhoN * .6 + uT * .04 + uSeed * .1 + vec3(0., .33, .67)));
+          totalEmissiveRadiance += film * pow(fres, 1.5) * .3 + diffuseColor.rgb * .35 + uGill * pow(fres, 3.) * .5;
+        }`);
+  };
+  cap.customProgramCacheKey = () => 'bgshroom';
+  const capMesh = new THREE.Mesh(geo, cap);
+  const capGroup = new THREE.Group();
+  capGroup.add(capMesh);
+  capGroup.position.set(bend * H, H, 0);
+  capGroup.rotation.z = -bend * 0.6 + (rand() - 0.5) * 0.15;
+  g.add(capGroup);
+
+  // stem: tapered, bent, slightly bulbous at the base, faintly glowing under the gills
+  const sp: THREE.Vector2[] = [];
+  for (let i = 0; i <= 16; i++) {
+    const t = i / 16;
+    const rad = stemR * (1.15 - 0.3 * t) * (1 + (kind === 'amanita' ? 0.6 : 0.25) * smooth(0.25, 0, t));
+    sp.push(new THREE.Vector2(rad, t * H));
+  }
+  const sg = new THREE.LatheGeometry(sp, 20);
+  const spos = sg.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < spos.count; i++) { const y = spos.getY(i) / H; spos.setX(i, spos.getX(i) + bend * H * y * y); }
+  sg.computeVertexNormals();
+  const stemMat = new THREE.MeshStandardMaterial({ color: 0xa89ad8, roughness: 0.8, emissive: new THREE.Color(0.07, 0.05, 0.14).add(gillC.clone().multiplyScalar(0.05)), envMapIntensity: 0.15 });
+  g.add(new THREE.Mesh(sg, stemMat));
+  if (kind === 'amanita') {
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(stemR * 1.1, stemR * 1.7, 0.12 * r, 20, 1, true), stemMat);
+    ring.position.set(bend * H * 0.64, H * 0.8, 0);
+    g.add(ring);
+  }
+  g.userData.cap = capGroup;
+  g.userData.seed = seed;
+  return g;
+}
+
+function makeForest(pulse: { value: number }) {
+  // A psychedelic grove behind the portal: varied, realistic mushroom forms with glowing gills and
+  // an oil-slick rainbow sheen on the caps, breathing and swaying.
   const rand = rng(909);
   const group = new THREE.Group();
-  const time = { value: 0 };
-  const capMat = new THREE.MeshStandardMaterial({ color: 0xc03a8c, roughness: 0.55, emissive: 0x30062a });
-  capMat.onBeforeCompile = (sh) => {
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vObj;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvObj = position;');
-    sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vObj;\n${NOISE_GLSL}`)
-      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-        {
-          // speckles on the cap, and the thin cyan line along its rim
-          float sp = step(.9, h21(floor(vObj.xz * 12. + vObj.y * 6.)));
-          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1., .55, .8), sp * step(.02, vObj.y));
-          float rimLine = smoothstep(.95, .99, length(vObj.xz)) * smoothstep(.05, -.01, vObj.y);
-          totalEmissiveRadiance += vec3(.2, .85, 1.1) * rimLine;
-        }`);
-  };
-  // One flared stalk: slim at the ground, swelling like a tree trunk into the cap, with blue almond
-  // spots glowing from inside the upper stalk (soft halo, bright core), twinkling slowly.
-  const stalkMat = new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x000000 });
-  stalkMat.onBeforeCompile = (sh) => {
-    sh.uniforms.uT = time;
-    sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec2 vSt;')
-      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvSt = uv;');
-    sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>\nuniform float uT; varying vec2 vSt;\n${NOISE_GLSL}`)
-      .replace('#include <envmap_fragment>', '')
-      .replace('#include <color_fragment>', `#include <color_fragment>
-        diffuseColor.rgb = mix(vec3(.28, .1, .42), vec3(.62, .34, .8), smoothstep(0., .7, vSt.y));
-        diffuseColor.rgb *= .85 + .3 * n2(vSt * vec2(40., 12.));`)
-      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-        {
-          vec2 q = vec2(vSt.x * 9., vSt.y * 9.);
-          q.x += step(1., mod(floor(q.y), 2.)) * .5;
-          vec2 id = floor(q), f = fract(q) - .5;
-          float h = h21(id + 3.);
-          vec2 e = f / vec2(.17, .34);
-          float d = length(e) + abs(e.x) * .6;
-          float core = smoothstep(1., .7, d), halo = smoothstep(2.2, .6, d);
-          float on = step(.25, h) * smoothstep(.45, .7, vSt.y) * smoothstep(1., .93, vSt.y);
-          float tw = .7 + .3 * sin(uT * 1.4 + h * 40.);
-          totalEmissiveRadiance += vec3(.15, .85, 1.05) * on * tw * (core * 1.1 + halo * .25) + diffuseColor.rgb * .28;
-        }`);
-  };
-  const places = [
-    [-7.5, -4], [-11, -9], [-5.5, -12], [7.8, -4.5], [11.5, -9], [5.5, -13], [-15, -3], [15, -2.5], [0, -16], [-9, 1.5], [9.5, 2],
+  const time = { value: 0 }, kick = { value: 0 };
+  const G = (r: number, g2: number, b: number) => new THREE.Color(r, g2, b);
+  const defs: { x: number; z: number; s: number; kind: CapKind; cap: number; gill: THREE.Color }[] = [
+    { x: -7.5, z: -4, s: 1.5, kind: 'wavy', cap: 0x8a1a8a, gill: G(0.1, 0.8, 1.1) },
+    { x: -11, z: -9, s: 2.2, kind: 'amanita', cap: 0xb0103a, gill: G(1, 0.3, 0.8) },
+    { x: -5, z: -12.5, s: 2.4, kind: 'liberty', cap: 0x6a3aa0, gill: G(0.2, 0.9, 1) },
+    { x: 7.8, z: -4.5, s: 1.3, kind: 'funnel', cap: 0x1a4aa0, gill: G(0.2, 1, 0.9) },
+    { x: 11.5, z: -9, s: 2.3, kind: 'parasol', cap: 0x8a2a6a, gill: G(0.2, 0.8, 1.1) },
+    { x: 5, z: -14, s: 2.6, kind: 'wavy', cap: 0x3a1a9a, gill: G(1, 0.35, 0.85) },
+    { x: -15, z: -3, s: 1.9, kind: 'parasol', cap: 0x5a1a8a, gill: G(0.2, 0.9, 1) },
+    { x: 15, z: -2.5, s: 1.8, kind: 'amanita', cap: 0xa0106a, gill: G(0.2, 0.85, 1.1) },
+    { x: 0, z: -18, s: 3.2, kind: 'liberty', cap: 0x7a2a9a, gill: G(1, 0.4, 0.9) },
+    { x: -9.5, z: 1.5, s: 1.0, kind: 'liberty', cap: 0x9a3a8a, gill: G(0.2, 0.9, 1) },
+    { x: -3.5, z: -6.5, s: 0.95, kind: 'funnel', cap: 0xb0206a, gill: G(0.2, 1, 1) },
+    { x: 3.8, z: -7, s: 1.05, kind: 'amanita', cap: 0x8a10a0, gill: G(0.2, 0.9, 1.1) },
   ];
-  const capGeo = new THREE.LatheGeometry(
-    [[0.001, 0.62], [0.3, 0.59], [0.55, 0.5], [0.75, 0.36], [0.9, 0.2], [0.99, 0.06], [1.02, 0.0], [0.98, -0.04], [0.85, -0.03]].map(([x, y]) => new THREE.Vector2(x, y)).reverse(),
-    48,
-  );
-  for (const [x, z] of places) {
-    const t = new THREE.Group();
-    const h = lerp(3, 5.5, rand()), cr = lerp(1.2, 2.0, rand());
-    const prof: THREE.Vector2[] = [];
-    for (let k = 0; k <= 24; k++) {
-      const u = k / 24;
-      const r = cr * (0.1 + 0.02 * (1 - u) + 0.72 * Math.pow(u, 3.2));
-      prof.push(new THREE.Vector2(r, u * h));
+  const shrooms: THREE.Group[] = [];
+  defs.forEach((d, i) => {
+    const m = makeBgShroom(d.kind, 300 + i, d.cap, d.gill, time, kick);
+    m.position.set(d.x, -0.05, d.z);
+    m.scale.setScalar(d.s);
+    m.rotation.y = rand() * 6;
+    group.add(m);
+    shrooms.push(m);
+    // a few small ones clustered at its base
+    const kinds: CapKind[] = ['amanita', 'liberty', 'wavy', 'funnel'];
+    const n = 1 + Math.floor(rand() * 3);
+    for (let k = 0; k < n; k++) {
+      const a = rand() * Math.PI * 2, dist = d.s * lerp(0.7, 1.4, rand());
+      const c = makeBgShroom(kinds[Math.floor(rand() * kinds.length)], 400 + i * 5 + k, d.cap, d.gill, time, kick);
+      c.position.set(d.x + Math.cos(a) * dist, -0.05, d.z + Math.sin(a) * dist);
+      c.scale.setScalar(d.s * lerp(0.25, 0.45, rand()));
+      c.rotation.y = rand() * 6;
+      group.add(c);
+      shrooms.push(c);
     }
-    const stalk = new THREE.Mesh(new THREE.LatheGeometry(prof, 40), stalkMat);
-    t.add(stalk);
-    const cap = new THREE.Mesh(capGeo, capMat);
-    cap.scale.set(cr * 1.05, cr * 0.7, cr * 1.05);
-    cap.position.y = h;
-    t.add(cap);
-    t.position.set(x, 0, z);
-    t.rotation.y = rand() * 6;
-    group.add(t);
-  }
-  function update(tt: number) {
-    time.value = tt;
-
+  });
+  function update(t: number) {
+    time.value = t;
+    kick.value = pulse.value - 0.8;
+    shrooms.forEach((m) => {
+      const s = m.userData.seed as number;
+      m.rotation.z = 0.02 * Math.sin(t * 0.45 + s);
+      m.rotation.x = 0.015 * Math.sin(t * 0.37 + s * 1.3);
+      const br = 1 + 0.025 * Math.sin(t * 0.8 + s);
+      (m.userData.cap as THREE.Group).scale.set(br, 1 / Math.sqrt(br), br);
+    });
   }
   return { group, update };
 }
@@ -971,6 +1064,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   const eyes: Eye[] = [];
   const left = makeTalons(-1, 1.15, 4, 3, eyes, 0.3, 1.45);
   const right = makeFist(1.0, 8, eyes);
+  right.group.position.y -= 0.4;
   rig.add(left.group, right.group);
 
   const figs = [makeFigure(), makeFigure()];
@@ -982,8 +1076,8 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   const chains = makeChains(figs, rig);
   scene.add(chains.mesh);
 
-  const forest = makeForest();
-  scene.add(forest.group);
+  const forest = makeForest(pulse);
+  if (!debug.noForest) scene.add(forest.group);
 
   const inflow = makeInflow(260);
   rig.add(inflow);
