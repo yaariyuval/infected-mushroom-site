@@ -214,9 +214,11 @@ img { display: block; max-width: 100%; }
 .title span { display: block; }
 .title { text-shadow: 0 2px 30px rgb(12 9 32 / 0.6); }
 .title .t1 {
-  font-stretch: 50%;
-  font-size: clamp(4.4rem, 17vw, 15.5rem);
-  letter-spacing: -0.01em;
+  /* lighter + a touch wider than the max so the counters stay open */
+  font-weight: 720;
+  font-stretch: 62%;
+  font-size: clamp(4rem, 15vw, 13.5rem);
+  letter-spacing: 0.01em;
 }
 .title .t2 {
   font-stretch: 150%;

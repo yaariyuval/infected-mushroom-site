@@ -59,7 +59,6 @@ const SKY_GLSL = /* glsl */ `
 uniform float uT;
 varying vec3 vWorld;
 const vec3 MAGENTA = vec3(1., .22, .78);
-const vec3 MOON = vec3(0.0500, 0.2920, -0.9551);
 float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float n2(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
   return mix(mix(h21(i), h21(i + vec2(1, 0)), f.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), f.x), f.y); }
@@ -83,14 +82,6 @@ void main() {
   float h = h21(id);
   c += vec3(.8, .85, 1.) * 2. * step(.986, h) * smoothstep(.1, 0., length(f)) * (.55 + .45 * sin(T * 1.5 + h * 60.)) * smoothstep(.04, .25, y);
 
-  float m = dot(rd, MOON);
-  float disc = smoothstep(.99855, .99875, m);
-  float bite = smoothstep(.99855, .99875, dot(rd, normalize(MOON + vec3(-.022, .02, .006))));
-  if (disc > 0.) {
-    vec3 mc = mix(vec3(.8, .85, 1.), vec3(.5, .95, 1.), fbm(rd.xy * 140.));
-    c += mc * .75 * disc * (1. - bite);
-  }
-  c += vec3(.2, .12, .6) * .12 * exp((m - 1.) * 160.);
 
   vec3 PL = vec3(-.397, .342, -.852);
   float dd = dot(rd, PL);
@@ -239,7 +230,7 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
       let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
       const a = Math.atan2(z, x);
       const low = smooth(ry, ry - 0.22 * r, y);
-      y += low * (0.035 * r * Math.sin(a * 11 + seed) + 0.03 * r * (noise3(x * 4, 0, z * 4) - 0.5));
+      y += low * r * (0.03 * (noise3(Math.cos(a) * 3 + seed, Math.sin(a) * 3, 2) - 0.5) * 2 + 0.012 * Math.sin(a * 9 + seed));
       x += bend * 0.64 * h;
       p.setXYZ(i, x, y, z);
     }
@@ -258,15 +249,24 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
   const droop = (rho: number) => 0.2 * r * smooth(0.3 * r, r, rho);
   const capPts: THREE.Vector2[] = [];
   const topRows = Math.round(lerp(16, 44, o.detail));
+  const thEnd = THREE.MathUtils.degToRad(92);
   for (let i = 0; i <= topRows; i++) {
-    const th = (i / topRows) * THREE.MathUtils.degToRad(102);
+    const th = (i / topRows) * thEnd;
     const rho = Math.max(0.001, r * Math.sin(th));
     capPts.push(new THREE.Vector2(rho, k * Math.cos(th) - droop(rho) + 0.05 * r));
   }
-  const rimY = capPts[capPts.length - 1].y;
+  // a thick, rounded margin that curls under, like a real cap edge
+  const edge = capPts[capPts.length - 1];
+  const bead = 0.045 * r;
+  const bc = new THREE.Vector2(edge.x - bead * 0.9, edge.y - bead * 0.35);
+  for (let deg = 10; deg >= -190; deg -= 25) {
+    const ph = THREE.MathUtils.degToRad(deg);
+    capPts.push(new THREE.Vector2(bc.x + bead * Math.cos(ph), bc.y + bead * Math.sin(ph)));
+  }
+  const rimY = bc.y - bead;
   const under = [
-    [0.93, rimY + 0.02 * r], [0.8, rimY + 0.07 * r], [0.6, rimY + 0.12 * r],
-    [0.4, rimY + 0.15 * r], [0.2, rimY + 0.17 * r], [stemTopR / r, rimY + 0.18 * r],
+    [(bc.x - bead * 1.2) / r, rimY + 0.05 * r], [0.8, rimY + 0.085 * r], [0.6, rimY + 0.13 * r],
+    [0.4, rimY + 0.16 * r], [0.2, rimY + 0.175 * r], [stemTopR / r, rimY + 0.185 * r],
   ];
   for (const [rr, y] of under) capPts.push(new THREE.Vector2(rr * r, y));
   const underY = (rho: number) => {
@@ -276,9 +276,13 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
       const [r0, y0] = under[i], [r1, y1] = under[i + 1];
       if (u <= r0 && u >= r1) return lerp(y0, y1, (r0 - u) / (r0 - r1));
     }
-    return under[under.length - 1][1];
+    return under[u > under[0][0] ? 0 : under.length - 1][1];
   };
-  const wave = (a: number, rho: number) => 0.05 * r * Math.sin(a * 6 + seed * 3) * smooth(0.55 * r, r, rho) + 0.02 * r * Math.sin(a * 13 + seed) * smooth(0.8 * r, r, rho);
+  // irregular, seamless undulation of the margin (periodic noise around the cap, not a sine)
+  const pn = (a: number, f: number, sd: number) => noise3(Math.cos(a) * f + sd * 7.3, Math.sin(a) * f, sd * 3.1) * 2 - 1;
+  const wave = (a: number, rho: number) =>
+    r * smooth(0.45 * r, r, rho) * (0.05 * pn(a, 1.3, seed) + 0.016 * pn(a, 3.6, seed + 5)) +
+    r * smooth(0.8 * r, r, rho) * 0.005 * pn(a, 11, seed + 9);
 
   // lathe wants the profile bottom-to-top for outward normals
   const capGeo = lathe([...capPts].reverse(), segs);
@@ -349,7 +353,7 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
     const plates = Math.round(lerp(60, 170, o.detail));
     const steps = 10;
     const posArr: number[] = [], colArr: number[] = [], idx: number[] = [];
-    const inner = stemTopR * 1.25, outer = 0.92 * r;
+    const inner = stemTopR * 1.25, outer = under[0][0] * r - 0.01 * r;
     for (let g = 0; g < plates; g++) {
       const a = (g / plates) * Math.PI * 2 + (rand() - 0.5) * 0.01;
       const start = g % 2 ? lerp(inner, outer, 0.45) : g % 4 === 2 ? lerp(inner, outer, 0.2) : inner;
@@ -358,7 +362,7 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
       for (let s = 0; s <= steps; s++) {
         const t = s / steps;
         const rho = lerp(start, outer, t);
-        const depth = 0.13 * r * Math.pow(Math.sin(Math.PI * lerp(0.08, 1, t)), 0.6) * smooth(0, 0.12, t);
+        const depth = 0.12 * r * Math.pow(Math.sin(Math.PI * lerp(0.08, 1, t)), 0.7) * smooth(0, 0.12, t) * smooth(1, 0.85, t);
         const yTop = underY(rho) + 0.01 * r + wave(a, rho);
         const x = ca * rho, z = sa * rho;
         const tilt = -0.06 * x;
@@ -528,31 +532,116 @@ function makeSpores(count: number, spread: THREE.Vector3, center: THREE.Vector3,
 
 /* ------------------------------------------------------------------ UFO */
 
+function panelTexture() {
+  // brushed metal with radial panel seams and concentric rings, mapped around the lathe
+  const c = document.createElement('canvas');
+  c.width = 1024; c.height = 256;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#b8b4d0';
+  g.fillRect(0, 0, c.width, c.height);
+  for (let i = 0; i < 1400; i++) {
+    g.fillStyle = `rgba(${Math.random() > 0.5 ? '255,255,255' : '40,36,70'},${Math.random() * 0.05})`;
+    g.fillRect(Math.random() * c.width, Math.random() * c.height, Math.random() * 60, 1);
+  }
+  g.strokeStyle = 'rgba(20,16,40,0.55)';
+  g.lineWidth = 2;
+  for (let i = 0; i < 32; i++) { const x = (i / 32) * c.width; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, c.height); g.stroke(); }
+  for (const y of [40, 78, 120, 150, 196, 230]) { g.beginPath(); g.moveTo(0, y); g.lineTo(c.width, y); g.stroke(); }
+  g.fillStyle = 'rgba(20,16,40,0.6)';
+  for (let i = 0; i < 64; i++) for (const y of [60, 170]) { g.beginPath(); g.arc((i / 64) * c.width + 8, y, 2, 0, 7); g.fill(); }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
 function makeUfo() {
   const group = new THREE.Group();
-  const hull = new THREE.LatheGeometry([
-    [0.001, -0.16], [0.35, -0.15], [0.7, -0.09], [0.98, -0.01], [1.02, 0.02], [0.8, 0.08], [0.45, 0.13], [0.001, 0.15],
-  ].map(([x, y]) => new THREE.Vector2(x, y)), 64);
-  const hullMat = new THREE.MeshPhysicalMaterial({ color: 0x55507a, metalness: 0.95, roughness: 0.22, clearcoat: 1, clearcoatRoughness: 0.1 });
-  group.add(new THREE.Mesh(hull, hullMat));
-  const dome = new THREE.Mesh(
-    new THREE.SphereGeometry(0.36, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2),
-    new THREE.MeshPhysicalMaterial({ color: 0x6fe8ff, emissive: 0x2bbcd8, emissiveIntensity: 1.2, roughness: 0.05, metalness: 0, clearcoat: 1, transparent: true, opacity: 0.85 }),
-  );
-  dome.position.y = 0.12;
-  group.add(dome);
-  const N = 14;
-  const lamps = new THREE.InstancedMesh(new THREE.SphereGeometry(0.045, 10, 8), new THREE.MeshBasicMaterial(), N);
-  const m = new THREE.Matrix4();
-  for (let i = 0; i < N; i++) {
-    const a = (i / N) * Math.PI * 2;
-    m.makeTranslation(Math.cos(a) * 0.97, 0.005, Math.sin(a) * 0.97);
-    lamps.setMatrixAt(i, m);
-    lamps.setColorAt(i, CYAN);
-  }
-  group.add(lamps);
+  const craft = new THREE.Group(); // wobbles; the beam stays vertical
+  group.add(craft);
 
-  const beamMat = new THREE.ShaderMaterial({
+  const hullPts = [
+    [0.001, -0.2], [0.2, -0.2], [0.26, -0.17], [0.34, -0.19], [0.55, -0.15], [0.78, -0.09], [0.96, -0.035],
+    [1.03, -0.01], [1.03, 0.025], [0.97, 0.05], [0.8, 0.09], [0.6, 0.13], [0.45, 0.16], [0.36, 0.17], [0.001, 0.17],
+  ].map(([x, y]) => new THREE.Vector2(x, y));
+  const tex = panelTexture();
+  const hullMat = new THREE.MeshPhysicalMaterial({
+    color: 0xc4c0e8, map: tex, metalness: 0.7, roughness: 0.34, clearcoat: 1, clearcoatRoughness: 0.08,
+    envMapIntensity: 2.2,
+  });
+  craft.add(new THREE.Mesh(new THREE.LatheGeometry(hullPts, 96), hullMat));
+
+  // glowing seam around the rim
+  const seam = new THREE.Mesh(new THREE.TorusGeometry(1.03, 0.012, 8, 128), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.1, 0.75, 1.05) }));
+  seam.rotation.x = Math.PI / 2;
+  seam.position.y = 0.008;
+  craft.add(seam);
+
+  // portholes on the rim band, chasing colours
+  const W = 28;
+  const wins = new THREE.InstancedMesh(new THREE.SphereGeometry(0.022, 10, 8), new THREE.MeshBasicMaterial(), W);
+  const m = new THREE.Matrix4();
+  for (let i = 0; i < W; i++) {
+    const a = (i / W) * Math.PI * 2;
+    m.makeTranslation(Math.cos(a) * 1.02, 0.0, Math.sin(a) * 1.02);
+    wins.setMatrixAt(i, m);
+    wins.setColorAt(i, CYAN);
+  }
+  craft.add(wins);
+
+  // glass canopy with a warm glowing cockpit and a tiny pilot
+  const canopy = new THREE.Mesh(
+    new THREE.SphereGeometry(0.4, 40, 20, 0, Math.PI * 2, 0, Math.PI / 2),
+    new THREE.MeshPhysicalMaterial({ color: 0x9ff4ff, metalness: 0, roughness: 0.04, clearcoat: 1, transparent: true, opacity: 0.14, envMapIntensity: 2.5 }),
+  );
+  canopy.position.y = 0.16;
+  craft.add(canopy);
+  const cockpit = new THREE.Mesh(new THREE.SphereGeometry(0.3, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.02, 0.16, 0.22) }));
+  cockpit.position.y = 0.16;
+  craft.add(cockpit);
+  const pilotMat = new THREE.MeshBasicMaterial({ color: 0x05030a });
+  const pilot = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.1, 4, 8), pilotMat);
+  body.position.y = 0.26;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.075, 12, 10), pilotMat);
+  head.scale.set(1, 1.25, 1);
+  head.position.y = 0.4;
+  pilot.add(body, head);
+  craft.add(pilot);
+
+  // antenna beacon
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.01, 0.2, 6), hullMat);
+  mast.position.y = 0.62;
+  const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.025, 10, 8), new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 0.3, 0.6) }));
+  beacon.position.y = 0.73;
+  craft.add(mast, beacon);
+
+  // engine ring and swirling core on the belly
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.035, 12, 64), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.06, 0.55, 0.75) }));
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = -0.185;
+  craft.add(ring);
+  const coreMat = new THREE.ShaderMaterial({
+    uniforms: { uT: { value: 0 } },
+    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
+    fragmentShader: `
+      uniform float uT; varying vec2 vUv;
+      void main() {
+        vec2 p = vUv - .5; float r = length(p) * 2.; float a = atan(p.y, p.x);
+        float swirl = .5 + .5 * sin(a * 5. + r * 10. - uT * 6.);
+        vec3 c = mix(vec3(.06, .5, .7), vec3(.7, .1, .55), swirl) * (1.2 - r) * (.5 + .5 * swirl);
+        gl_FragColor = vec4(c, 1.);
+      }`,
+    side: THREE.DoubleSide,
+  });
+  const core = new THREE.Mesh(new THREE.CircleGeometry(0.26, 48), coreMat);
+  core.rotation.x = Math.PI / 2;
+  core.position.y = -0.19;
+  craft.add(core);
+
+  /* tractor beam: two nested cones, rising motes, and a ripple where it lands */
+  const beamMat = (inner: boolean) => new THREE.ShaderMaterial({
     uniforms: { uT: { value: 0 }, uOn: { value: 0 } },
     vertexShader: `
       varying vec2 vUv; varying float vF;
@@ -565,45 +654,194 @@ function makeUfo() {
       }`,
     fragmentShader: `
       uniform float uT, uOn; varying vec2 vUv; varying float vF;
+      float h(float x) { return fract(sin(x * 91.7) * 43758.5); }
       void main() {
-        float bands = .75 + .25 * sin(vUv.y * 40. + uT * 8.);
-        float a = pow(vF, 2.5) * smoothstep(0., .25, vUv.y) * (.35 + .65 * vUv.y) * bands * uOn;
-        gl_FragColor = vec4(vec3(.25, .95, 1.) * a * .9, 1.);
+        float y = vUv.y;
+        float bands = .6 + .4 * sin(y * 55. - uT * 9.) * sin(vUv.x * 6.2832 * 3. + uT * 1.5);
+        float streak = .7 + .3 * sin(vUv.x * 6.2832 * 11. + y * 8. + uT * 2.);
+        float a = pow(vF, ${inner ? '1.5' : '3.'}) * smoothstep(0., .12, y) * smoothstep(1., .9, y) * (.3 + .7 * y) * bands * streak * uOn;
+        vec3 c = ${inner ? 'vec3(.5, 1.6, 2.)' : 'vec3(.1, .8, 1.2)'};
+        gl_FragColor = vec4(c * a * ${inner ? '.55' : '.45'}, 1.);
       }`,
     blending: THREE.AdditiveBlending,
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide,
   });
-  const beamH = 7.5;
-  const beamGeo = new THREE.CylinderGeometry(0.28, 1.25, beamH, 40, 1, true);
-  beamGeo.translate(0, -beamH / 2 - 0.1, 0);
-  const beam = new THREE.Mesh(beamGeo, beamMat);
+  const beam = new THREE.Group();
+  const outerMat = beamMat(false), innerMat = beamMat(true);
+  const cone = (rTop: number, rBot: number, mat: THREE.Material) => {
+    const g = new THREE.CylinderGeometry(rTop, rBot, 1, 48, 1, true);
+    g.translate(0, -0.5, 0);
+    return new THREE.Mesh(g, mat);
+  };
+  beam.add(cone(0.3, 1.5, outerMat), cone(0.18, 0.8, innerMat));
+  beam.position.y = -0.2;
   group.add(beam);
 
-  const spot = new THREE.SpotLight(CYAN, 0, 14, 0.2, 0.8, 1.5);
+  const M = 160;
+  const motePos = new Float32Array(M * 3), moteSeed = new Float32Array(M);
+  for (let i = 0; i < M; i++) { moteSeed[i] = Math.random(); }
+  const moteGeo = new THREE.BufferGeometry();
+  moteGeo.setAttribute('position', new THREE.BufferAttribute(motePos, 3));
+  moteGeo.setAttribute('aSeed', new THREE.BufferAttribute(moteSeed, 1));
+  const moteMat = new THREE.ShaderMaterial({
+    uniforms: { uT: { value: 0 }, uOn: { value: 0 }, uLen: { value: 6 }, uSize: { value: 40 } },
+    vertexShader: `
+      attribute float aSeed; uniform float uT, uLen, uSize, uOn; varying float vA;
+      void main() {
+        float k = fract(aSeed * 7.3 + uT * (.08 + .06 * fract(aSeed * 13.)));
+        float y = -uLen + k * uLen;
+        float rad = mix(.15, 1.3, 1. - k) * fract(aSeed * 31.);
+        float a = aSeed * 50. + uT * (1. + fract(aSeed * 3.)) + k * 6.;
+        vec3 p = vec3(cos(a) * rad, y, sin(a) * rad);
+        vec4 mv = modelViewMatrix * vec4(p, 1.);
+        gl_Position = projectionMatrix * mv;
+        gl_PointSize = uSize * (.5 + fract(aSeed * 17.)) / -mv.z;
+        vA = uOn * smoothstep(0., .1, k) * smoothstep(1., .85, k);
+      }`,
+    fragmentShader: `
+      varying float vA;
+      void main() { float d = length(gl_PointCoord - .5); float a = smoothstep(.5, 0., d); gl_FragColor = vec4(vec3(.5, 1.5, 2.) * a * a * vA, 1.); }`,
+    blending: THREE.AdditiveBlending, transparent: true, depthWrite: false,
+  });
+  const motes = new THREE.Points(moteGeo, moteMat);
+  motes.frustumCulled = false;
+  beam.add(motes);
+
+  const rippleMat = new THREE.ShaderMaterial({
+    uniforms: { uT: { value: 0 }, uOn: { value: 0 } },
+    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
+    fragmentShader: `
+      uniform float uT, uOn; varying vec2 vUv;
+      void main() {
+        float r = length(vUv - .5) * 2.;
+        float rings = pow(.5 + .5 * sin(r * 22. - uT * 5.), 6.);
+        float a = (rings * .8 + .5 * smoothstep(.5, 0., r)) * smoothstep(1., .6, r) * uOn;
+        gl_FragColor = vec4(vec3(.2, 1.1, 1.6) * a * .6, 1.);
+      }`,
+    blending: THREE.AdditiveBlending, transparent: true, depthWrite: false,
+  });
+  const ripple = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), rippleMat);
+  ripple.rotation.x = -Math.PI / 2;
+  group.add(ripple);
+
+  const spot = new THREE.SpotLight(CYAN, 0, 16, 0.24, 0.8, 1.5);
   spot.position.set(0, -0.2, 0);
   spot.target.position.set(0, -10, 0);
   group.add(spot, spot.target);
+  const underGlow = new THREE.PointLight(CYAN, 2, 3, 2);
+  underGlow.position.y = -0.5;
+  craft.add(underGlow);
 
+  const SCALE = 1.45;
+  group.scale.setScalar(SCALE);
   const tmp = new THREE.Color();
   function update(t: number) {
-    group.position.set(3.5 * Math.sin(t * 0.06), 6.6 + 0.25 * Math.sin(t * 0.8), -12 + 2.5 * Math.cos(t * 0.06));
-    group.rotation.y = t * 0.6;
-    group.rotation.z = 0.06 * Math.sin(t * 0.5);
-    const on = smooth(0.2, 0.6, Math.sin(t * 0.21 + 1));
-    beamMat.uniforms.uT.value = t;
-    beamMat.uniforms.uOn.value = on;
+    const x = -0.8 + 3.8 * Math.sin(t * 0.07), z = -7.5 + 2.2 * Math.cos(t * 0.07);
+    const y = 5.4 + 0.22 * Math.sin(t * 0.8);
+    group.position.set(x, y, z);
+    craft.rotation.set(0.07 * Math.sin(t * 0.5), t * 0.5, 0.08 * Math.cos(t * 0.37 + 1) - 0.06 * Math.cos(t * 0.07));
+    const on = smooth(0.15, 0.55, Math.sin(t * 0.2 + 1));
+    const ground = groundH(x, z);
+    const len = (y - ground) / SCALE - 0.2;
+    beam.scale.set(1, len, 1);
     beam.visible = on > 0.01;
-    spot.intensity = on * 60;
-    for (let i = 0; i < N; i++) {
-      const lit = Math.sin((i / N) * Math.PI * 2 * 3 - t * 5) > 0.3;
-      tmp.copy(i % 2 ? MAGENTA : CYAN).multiplyScalar(lit ? 4 : 0.4);
-      lamps.setColorAt(i, tmp);
+    for (const mt of [outerMat, innerMat, rippleMat]) { mt.uniforms.uT.value = t; mt.uniforms.uOn.value = on; }
+    moteMat.uniforms.uT.value = t; moteMat.uniforms.uOn.value = on;
+    moteMat.uniforms.uLen.value = 1; // motes live in beam space (already scaled by len)
+    ripple.position.y = (ground + 0.04 - y) / SCALE;
+    ripple.visible = on > 0.01;
+    spot.intensity = on * 90;
+    coreMat.uniforms.uT.value = t;
+    underGlow.intensity = 0.8 + 1.2 * on;
+    (beacon.material as THREE.MeshBasicMaterial).color.setRGB(1, 0.1, 0.25).multiplyScalar(Math.sin(t * 6) > 0.6 ? 2.2 : 0.15);
+    pilot.rotation.y = Math.sin(t * 0.9) * 0.8;
+    for (let i = 0; i < W; i++) {
+      const lit = 0.5 + 0.5 * Math.sin((i / W) * Math.PI * 2 * 4 - t * 6);
+      tmp.copy(i % 3 === 0 ? MAGENTA : CYAN).multiplyScalar(0.25 + 1.4 * Math.pow(lit, 3));
+      wins.setColorAt(i, tmp);
     }
-    lamps.instanceColor!.needsUpdate = true;
+    wins.instanceColor!.needsUpdate = true;
   }
-  return { group, update };
+  return { group, update, moteMat };
+}
+
+/* ----------------------------------------------------------------- moon */
+
+function makeMoon(sunDir: THREE.Vector3) {
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uSun: { value: sunDir }, uT: { value: 0 } },
+    vertexShader: `
+      varying vec3 vObj; varying vec3 vN; varying vec3 vView;
+      void main() {
+        vObj = position;
+        vN = normalize(mat3(modelMatrix) * normal);
+        vec4 w = modelMatrix * vec4(position, 1.);
+        vView = normalize(cameraPosition - w.xyz);
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }`,
+    fragmentShader: `
+      uniform vec3 uSun; uniform float uT;
+      varying vec3 vObj; varying vec3 vN; varying vec3 vView;
+      float h3(vec3 p) { p = fract(p * .3183099 + .1); p *= 17.; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+      float n3(vec3 x) {
+        vec3 i = floor(x), f = fract(x); f = f * f * (3. - 2. * f);
+        return mix(mix(mix(h3(i), h3(i + vec3(1,0,0)), f.x), mix(h3(i + vec3(0,1,0)), h3(i + vec3(1,1,0)), f.x), f.y),
+                   mix(mix(h3(i + vec3(0,0,1)), h3(i + vec3(1,0,1)), f.x), mix(h3(i + vec3(0,1,1)), h3(i + vec3(1,1,1)), f.x), f.y), f.z);
+      }
+      float fbm(vec3 p) { float s = 0., a = .5; for (int i = 0; i < 5; i++) { s += a * n3(p); p *= 2.07; a *= .5; } return s; }
+      // craters: bowl darkening + bright raised rim
+      vec2 craters(vec3 p) {
+        vec3 i = floor(p), f = fract(p);
+        float bowl = 0., rim = 0.;
+        for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++) for (int z = -1; z <= 1; z++) {
+          vec3 b = vec3(x, y, z);
+          vec3 o = vec3(h3(i + b), h3(i + b + 7.1), h3(i + b + 13.3));
+          float d = length(b + o - f);
+          float s = .18 + .3 * h3(i + b + 3.3);
+          if (h3(i + b + 5.7) < .55) continue;
+          bowl = max(bowl, smoothstep(s, s * .55, d));
+          rim = max(rim, smoothstep(s * 1.25, s, d) * smoothstep(s * .75, s, d));
+        }
+        return vec2(bowl, rim);
+      }
+      void main() {
+        vec3 p = normalize(vObj);
+        float maria = smoothstep(.42, .6, fbm(p * 1.7 + 3.));
+        float alb = .72 - .4 * maria + .18 * (fbm(p * 10.) - .5);
+        vec2 c1 = craters(p * 3.5), c2 = craters(p * 9. + 5.);
+        alb *= 1. - .35 * c1.x - .2 * c2.x;
+        alb += .28 * c1.y + .14 * c2.y;
+        // relief: shift lighting by crater slope toward the sun
+        vec3 n = normalize(vN);
+        float lit = dot(n, uSun);
+        float terminator = smoothstep(-.06, .25, lit);
+        vec3 col = vec3(.8, .82, 1.) * alb * terminator * .95;
+        col += vec3(.16, .12, .38) * alb * .42 * (1. - terminator);   // earthshine keeps the dark side readable
+        float fres = pow(1. - max(dot(n, vView), 0.), 3.);
+        col += vec3(.45, .55, 1.) * fres * .35 * smoothstep(-.3, .3, lit); // lit limb glow
+        gl_FragColor = vec4(col, 1.);
+      }`,
+  });
+  const moon = new THREE.Mesh(new THREE.SphereGeometry(1, 96, 48), mat);
+
+  // soft atmospheric halo behind it
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d')!;
+  const grd = g.createRadialGradient(128, 128, 30, 128, 128, 128);
+  grd.addColorStop(0, 'rgba(170,150,255,0.35)');
+  grd.addColorStop(0.35, 'rgba(120,90,255,0.18)');
+  grd.addColorStop(1, 'rgba(60,20,160,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 256, 256);
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, fog: false }));
+  halo.renderOrder = -0.5;
+  const group = new THREE.Group();
+  group.add(halo, moon);
+  moon.userData.halo = halo;
+  return { group, moon, halo, mat };
 }
 
 /* -------------------------------------------------------------- helpers */
@@ -683,9 +921,9 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   }
 
   scene.add(new THREE.HemisphereLight(0x4a2a8a, 0x05030c, 0.5));
-  const moon = new THREE.DirectionalLight(0xb4a8ff, 1.1);
-  moon.position.set(0.5, 3, -10);
-  scene.add(moon);
+  const moonLight = new THREE.DirectionalLight(0xb4a8ff, 1.1);
+  moonLight.position.set(0.5, 3, -10);
+  scene.add(moonLight);
   const key = new THREE.DirectionalLight(0x9a6cff, 0.8);
   key.position.set(-6, 5, 7);
   scene.add(key);
@@ -740,6 +978,30 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   const ufo = makeUfo();
   scene.add(ufo.group);
 
+  // a big crescent moon, lit from behind and to the right
+  const MOON_DIR = new THREE.Vector3();
+  const moonRel = new THREE.Vector3(); // relative to where the camera is heading
+  const sun = new THREE.Vector3();
+  const Y = new THREE.Vector3(0, 1, 0);
+  const moon = makeMoon(sun);
+  const MOON_DIST = 200, MOON_R = MOON_DIST * Math.tan(THREE.MathUtils.degToRad(4));
+  function placeMoon(portrait: boolean) {
+    // landscape: the clear sky between the planet and the giant; portrait: above the giant
+    moonRel.set(portrait ? 0.07 : 0.15, portrait ? 0.39 : 0.3, -1).normalize();
+  }
+  function aimMoon(yaw: number) {
+    MOON_DIR.copy(moonRel).applyAxisAngle(Y, -yaw);
+    // light from the viewer's right and slightly behind the moon: the same fat crescent in either layout
+    const right = new THREE.Vector3(-MOON_DIR.z, 0, MOON_DIR.x).normalize();
+    sun.copy(right).multiplyScalar(0.85).add(new THREE.Vector3(0, 0.25, 0)).addScaledVector(MOON_DIR, 0.35).normalize();
+  }
+  placeMoon(false);
+  aimMoon(0);
+  moon.moon.scale.setScalar(MOON_R);
+  moon.halo.scale.setScalar(MOON_R * 5);
+  moon.moon.rotation.set(0.4, 0.8, 0.2);
+  scene.add(moon.group);
+
   // post: bloom for the bioluminescence
   const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 2 }));
   composer.addPass(new RenderPass(scene, camera));
@@ -760,12 +1022,14 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     camera.updateProjectionMatrix();
     shift = portrait ? 0.3 : -Math.min(2.9, 1.6 * (w / h));
     dist = portrait ? 14 : 11;
+    placeMoon(portrait);
     renderer.setPixelRatio(pr);
     renderer.setSize(w, h, false);
     composer.setPixelRatio(pr);
     composer.setSize(w, h);
     (spores.material as THREE.ShaderMaterial).uniforms.uSize.value = 55 * pr * (h / 800);
     (moss.material as THREE.ShaderMaterial).uniforms.uSize.value = 30 * pr * (h / 800);
+    ufo.moteMat.uniforms.uSize.value = 45 * pr * (h / 800);
   }
 
   let mx = 0, my = 0, tx = 0, ty = 0;
@@ -786,6 +1050,9 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     if (debug.cam) { camera.position.fromArray(debug.cam[0]); target.fromArray(debug.cam[1]); }
     camera.lookAt(target);
     sky.position.copy(camera.position);
+    aimMoon(Math.atan2(target.x - camera.position.x, camera.position.z - target.z));
+    moon.group.position.copy(camera.position).addScaledVector(MOON_DIR, MOON_DIST);
+    moon.moon.rotation.y = 0.8 + t * 0.004;
     (sky.material as THREE.ShaderMaterial).uniforms.uT.value = t;
 
     pulse.value = 0.75 + 0.45 * kick;
