@@ -3,6 +3,8 @@ import { getCollection } from 'astro:content';
 import Base from '../layouts/Base.astro';
 import MushroomScene from '../components/MushroomScene.astro';
 import Arrow from '../components/Arrow.astro';
+import Emblem from '../components/Emblem.astro';
+import Wordmark from '../components/Wordmark.astro';
 import site from '../data/site.json';
 import { asset, weekday, day, month, isoDay } from '../lib/util';
 
@@ -78,11 +80,11 @@ const jsonLd = shows.map((s) => ({
 >
   <header class="site-header">
     <div class="wrap">
-      <a class="mark" href={asset('/')} aria-label="Infected Mushroom home">IM</a>
+      <a class="mark" href={asset('/')} aria-label="Infected Mushroom home"><Emblem class="emblem" /></a>
       <nav class="nav" aria-label="Main">
         <a href="#tour">Tour</a>
         <a href="#music">Music</a>
-        <a href="#about">About</a>
+        <a class="nav-about" href="#about">About</a>
         {site.shop_url && <a href={site.shop_url} rel="noopener">Merch<Arrow /></a>}
         {site.links.spotify && (
           <a class="icon-link" href={site.links.spotify} rel="noopener" aria-label="Infected Mushroom on Spotify">
@@ -103,7 +105,7 @@ const jsonLd = shows.map((s) => ({
       <MushroomScene />
       <div class="wrap">
         <p class="eyebrow">Psytrance since 1996 · {site.tour_name}</p>
-        <h1 class="title"><span class="t1">Infected</span><span class="t2">Mushroom</span></h1>
+        <h1 class="title"><span class="sr-only">Infected Mushroom</span><Wordmark class="wordmark" /></h1>
         <div class="hero-meta">
           {next ? (
             <>

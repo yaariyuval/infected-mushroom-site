@@ -1,4 +1,4 @@
-@import '@fontsource-variable/anybody/standard.css';
+@import '@fontsource-variable/tektur/standard.css';
 @import '@fontsource-variable/geologica';
 @import '@fontsource-variable/martian-mono/standard.css';
 
@@ -14,7 +14,7 @@
   --glo: #ff3cc7;
   --ember: #ffb23b;
 
-  --display: 'Anybody Variable', 'Arial Narrow', sans-serif;
+  --display: 'Tektur Variable', 'Arial Narrow', sans-serif;
   --body: 'Geologica Variable', system-ui, sans-serif;
   --mono: 'Martian Mono Variable', ui-monospace, monospace;
 
@@ -59,6 +59,15 @@ img { display: block; max-width: 100%; }
   max-width: var(--max);
   margin-inline: auto;
   padding-inline: var(--gutter);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .skip {
@@ -140,15 +149,9 @@ img { display: block; max-width: 100%; }
   gap: 1rem;
   padding-block: 22px;
 }
-.mark {
-  font-family: var(--display);
-  font-weight: 900;
-  font-stretch: 60%;
-  font-size: 1.75rem;
-  line-height: 1;
-  text-decoration: none;
-  letter-spacing: -0.01em;
-}
+.mark { display: inline-flex; color: var(--bone); transition: color 0.2s; }
+.mark:hover { color: #bfeeff; }
+.mark .emblem { width: 46px; height: auto; display: block; }
 .nav {
   display: flex;
   gap: clamp(14px, 3vw, 32px);
@@ -163,9 +166,14 @@ img { display: block; max-width: 100%; }
 .icon-link { display: inline-flex; padding: 2px; }
 .icon-link svg { width: 20px; height: 20px; }
 .listen { display: flex; flex-wrap: wrap; gap: 12px; }
+.nav a { white-space: nowrap; flex-shrink: 0; }
 @media (max-width: 480px) {
-  .nav { gap: 12px; }
-  .nav a:not(.icon-link) { font-size: 0.6875rem; }
+  .nav { gap: 11px; }
+  .nav a:not(.icon-link) { font-size: 0.6875rem; letter-spacing: 0.04em; }
+  .mark .emblem { width: 38px; }
+}
+@media (max-width: 400px) {
+  .nav .nav-about { display: none; }
 }
 
 /* ---------- Hero ---------- */
@@ -204,29 +212,15 @@ img { display: block; max-width: 100%; }
 }
 .hero .wrap { padding-block: 120px clamp(40px, 8vh, 88px); }
 
-.title {
-  margin: 0;
-  font-family: var(--display);
-  font-weight: 900;
-  line-height: 0.82;
-  text-transform: uppercase;
+.title { margin: 0; line-height: 0; }
+.wordmark {
+  display: block;
+  width: min(92%, 780px);
+  height: auto;
+  overflow: visible;
+  filter: drop-shadow(0 10px 40px rgb(12 9 32 / 0.55));
 }
-.title span { display: block; }
-.title { text-shadow: 0 2px 30px rgb(12 9 32 / 0.6); }
-.title .t1 {
-  /* lighter + a touch wider than the max so the counters stay open */
-  font-weight: 720;
-  font-stretch: 62%;
-  font-size: clamp(4rem, 15vw, 13.5rem);
-  letter-spacing: 0.01em;
-}
-.title .t2 {
-  font-stretch: 150%;
-  font-weight: 800;
-  font-size: clamp(2.05rem, 7.9vw, 7.2rem);
-  letter-spacing: -0.02em;
-  margin-top: 0.08em;
-}
+.wordmark .wm-shadow { fill: var(--glo); }
 
 .hero-meta {
   display: flex;
@@ -261,9 +255,9 @@ img { display: block; max-width: 100%; }
   margin: 0;
   font-family: var(--display);
   font-weight: 900;
-  font-stretch: 50%;
+  font-stretch: 75%;
   text-transform: uppercase;
-  font-size: clamp(3.2rem, 9vw, 7rem);
+  font-size: clamp(3rem, 8.5vw, 6.5rem);
   line-height: 0.85;
 }
 
@@ -293,13 +287,13 @@ img { display: block; max-width: 100%; }
   display: block;
   font-family: var(--display);
   font-weight: 800;
-  font-stretch: 70%;
-  font-size: 2.4rem;
+  font-stretch: 75%;
+  font-size: 2.3rem;
   line-height: 1;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.show-date .d.range { font-stretch: 50%; font-size: 1.9rem; }
+.show-date .d.range { font-size: 1.6rem; }
 .show-date .m,
 .show-date .w { font-size: 0.6875rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
 
@@ -308,14 +302,15 @@ img { display: block; max-width: 100%; }
   margin: 0;
   font-family: var(--display);
   font-weight: 800;
-  font-stretch: 62%;
-  font-size: clamp(1.9rem, 4.6vw, 3.4rem);
+  font-stretch: 75%;
+  font-size: clamp(1.8rem, 4.2vw, 3.1rem);
   line-height: 0.95;
   text-transform: uppercase;
   transition: font-stretch 0.45s cubic-bezier(0.2, 0.8, 0.2, 1), color 0.3s;
   overflow-wrap: anywhere;
 }
 .show:hover .show-city { font-stretch: 100%; }
+.show-city { letter-spacing: 0.01em; }
 .show-city .country { color: var(--dim); font-weight: 500; }
 .show-venue { margin: 6px 0 0; color: var(--dim); }
 .show-venue b { color: var(--bone); font-weight: 500; }
@@ -361,7 +356,7 @@ img { display: block; max-width: 100%; }
   }
   .show-date .d { font-size: 1.9rem; }
   .show-date .d.range { font-size: 1.35rem; }
-  .show:hover .show-city { font-stretch: 62%; }
+  .show:hover .show-city { font-stretch: 75%; }
 }
 
 /* ---------- Spore disc (placeholder cover art) ---------- */
@@ -401,7 +396,7 @@ img { display: block; max-width: 100%; }
   margin: 8px 0 16px;
   font-family: var(--display);
   font-weight: 900;
-  font-stretch: 150%;
+  font-stretch: 100%;
   font-size: clamp(3rem, 8vw, 6.5rem);
   line-height: 0.9;
   text-transform: uppercase;
