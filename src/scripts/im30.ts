@@ -734,69 +734,55 @@ function makeTalons(scale: number, seed: number, eyes: Eye[]) {
   return { group, update };
 }
 
-// Right hand, from the cover: a clenched fist of three thick fingers and a thumb, stacked with narrow dark
-// gaps, coming down from the upper right and curling over the ring's right edge at rounded tips.
-// Eye layout, top to bottom (distances from the fingertip in finger thicknesses):
-//   finger 1: a long sleepy eye;  knuckle eye further back
-//   finger 2: a small tilted slit at the tip and a big open eye behind it
-//   finger 3: a big open eye near the tip;  a sleepy knuckle eye further back
-//   thumb:    a long tilted slit
-function makeFist(scale: number, seed: number, eyes: Eye[]) {
-  const rand = rng(seed);
-  const group = new THREE.Group();
-  group.position.copy(PORTAL);
-  const skin = skinMaterial();
-  const flex: Flexer[] = [];
-  const X = RING_R + 0.35;
-  const H = 0.56 * scale, D = 2 * H, GAP = 0.13 * D;
-  const rows: { y: number; H: number; eyes: EyeSpec[] }[] = [
-    { y: 1, H: 1, eyes: [{ d: 1.15, w: 1.3, asp: 3.6, lid: 0.55, tilt: -0.12 }, { d: 3.0, w: 1.1, asp: 2.3, lid: 0, tilt: -0.05 }] },
-    { y: 0, H: 1, eyes: [{ d: 0.42, w: 0.7, asp: 3.0, lid: 0.45, tilt: 0.62, up: 0.12 }, { d: 1.75, w: 1.0, asp: 2.35, lid: 0, tilt: -0.08 }] },
-    { y: -1, H: 1, eyes: [{ d: 0.62, w: 1.05, asp: 2.1, lid: 0, tilt: 0.12 }, { d: 2.75, w: 1.2, asp: 3.8, lid: 0.55, tilt: -0.05 }] },
-  ];
-  rows.forEach((row, i) => {
-    const y = row.y * (D + GAP) + 0.1;
-    const z0 = 0.55;
-    const pts = [
-      [X + 3.5, y + 0.95, z0 - 0.25], [X + 2.3, y + 0.6, z0], [X + 1.1, y + 0.28, z0 + 0.06],
-      [X + 0.15, y + 0.05, z0 + 0.1], [X - 0.35, y - 0.32, z0 + 0.14], [X - 0.48, y - 0.78, z0 + 0.02],
-    ].map(([x, yv, z]) => new THREE.Vector3(x, yv, z));
-    const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4);
-    const profile = (t: number) => {
-      const tip = t > 0.88 ? Math.sqrt(Math.max(0, 1 - Math.pow((t - 0.88) / 0.12, 2))) : 1;
-      return (1 - 0.1 * smooth(0.3, 1, t) + 0.06 * Math.exp(-Math.pow((t - 0.72) / 0.1, 2))) * tip;
-    };
-    const mesh = makeFingerMesh(curve, { H, W: H * 1.15, n: 3, profile }, skin);
-    const g = new THREE.Group();
-    g.add(mesh);
-    const tipU = uExtreme(curve, 1);
-    row.eyes.forEach((e) => g.add(projectEye(mesh, curve, uFrom(curve, tipU, -e.d, D), D, e, eyes, rand)));
-    group.add(g);
-    flex.push({ g, phase: rand() * 6, amp: 0.02 });
-  });
-  // thumb: along the bottom, rising diagonally to the right
+// Right hand: the painted fist cut straight out of the IM30 cover art (finger shapes, gaps and eyes exactly
+// as painted), standing in front of the ring's right edge and always facing the camera. A vertex shader
+// makes it feel alive: the fingers squeeze slowly (tips move most), the hand breathes and brightens on the beat.
+function makePaintedFist(src: string) {
+  const tex = new THREE.TextureLoader().load(src);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  const ASPECT = 768 / 1032;
+  const HGT = 4.9, WID = HGT * ASPECT;
+  // the plane runs 60% past the painting's right edge; those UVs clamp to the last column, so the back of
+  // the hand keeps going off-screen instead of ending in a hard vertical cut
+  const EXT = 0.6;
+  const geo = new THREE.PlaneGeometry(WID * (1 + EXT), HGT, 32, 32);
+  geo.translate(WID * EXT / 2, 0, 0);
   {
-    const Ht = H * 0.9, Dt = 2 * Ht;
-    const y = -2 * (D + GAP) + 0.25;
-    const pts = [
-      [X + 3.2, y + 1.2, 0.1], [X + 1.9, y + 0.7, 0.6], [X + 0.6, y + 0.2, 0.72], [X - 0.25, y - 0.1, 0.7], [X - 0.55, y - 0.4, 0.5],
-    ].map(([x, yv, z]) => new THREE.Vector3(x, yv, z));
-    const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4);
-    const profile = (t: number) => {
-      const tip = t > 0.85 ? Math.sqrt(Math.max(0, 1 - Math.pow((t - 0.85) / 0.15, 2))) : 1;
-      return (1 - 0.15 * t) * tip;
-    };
-    const mesh = makeFingerMesh(curve, { H: Ht, W: Ht * 1.1, n: 3, profile }, skin);
-    const g = new THREE.Group();
-    g.add(mesh);
-    g.add(projectEye(mesh, curve, uFrom(curve, uExtreme(curve, 1), -1.6, Dt), Dt, { d: 1.6, w: 1.35, asp: 4.2, lid: 0.6, tilt: 0.45 }, eyes, rand));
-    group.add(g);
-    flex.push({ g, phase: rand() * 6, amp: 0.015 });
+    const uv = geo.attributes.uv as THREE.BufferAttribute;
+    for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * (1 + EXT));
   }
-  function update(t: number) {
-    flex.forEach((f) => { f.g.rotation.z = f.amp * Math.sin(t * 0.6 + f.phase); });
-  }
-  return { group, update };
+  const uniforms = { map: { value: tex }, uT: { value: 0 }, uKick: { value: 0 } };
+  const mat = new THREE.ShaderMaterial({
+    uniforms,
+    vertexShader: `
+      uniform float uT, uKick; varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        vec3 p = position;
+        float tip = max(1. - uv.x, 0.);              // fingertips are on the left
+        float fingerBand = sin(uv.y * 16.5);        // roughly one period per finger
+        p.x += tip * tip * (.06 * sin(uT * .9 + uv.y * 3.) + .03 * fingerBand * sin(uT * 1.3));
+        p.y += tip * .04 * sin(uT * .7 + uv.y * 5.);
+        p *= 1. + .012 * uKick;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.);
+      }`,
+    fragmentShader: `
+      uniform sampler2D map; uniform float uKick; varying vec2 vUv;
+      void main() {
+        vec4 c = texture2D(map, vec2(min(vUv.x, .997), vUv.y));
+        if (c.a < .02) discard;
+        // pre-compensate the scene's filmic tone mapping so the paint keeps the cover's colours
+        vec3 lin = min(c.rgb * 1.02, vec3(.9)) * (1. + .05 * uKick);   // keep whites under the bloom threshold
+        gl_FragColor = vec4(lin, c.a);
+      }`,
+    transparent: true, depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.renderOrder = 5;
+  const group = new THREE.Group();
+  group.add(mesh);
+  return { group, mesh, uniforms, WID, HGT };
 }
 
 /* ---------------------------------------------------- chains and figures */
@@ -1208,9 +1194,9 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
 
   const eyes: Eye[] = [];
   const left = makeTalons(1.0, 3, eyes);
-  const right = makeFist(1.0, 8, eyes);
-  right.group.position.y -= 0.4;
-  rig.add(left.group, right.group);
+  const fist = makePaintedFist(`${import.meta.env.BASE_URL.replace(/\/$/, '')}/media/im30-fist.webp`);
+  scene.add(fist.group);
+  rig.add(left.group);
 
   const figs = [makeFigure(), makeFigure()];
   // out in front of where the portal faces, trudging away from it
@@ -1301,7 +1287,14 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     });
     roots.update(t);
     left.update(t);
-    right.update(t);
+    // painted fist: fingertips resting over the ring's right edge, facing the camera
+    rig.updateMatrixWorld();
+    const anchor = rig.localToWorld(new THREE.Vector3(RING_R - TUBE * 1.1, -0.05, 0.95).add(PORTAL));
+    fist.group.position.copy(anchor);
+    fist.group.quaternion.copy(camera.quaternion);
+    fist.mesh.position.set(fist.WID / 2 - 0.1, -0.25, 0);
+    fist.uniforms.uT.value = t;
+    fist.uniforms.uKick.value = kick;
     figs.forEach((f, i) => {
       const tug = Math.sin(t * 1.1 + i * 1.7);
       // heaving forward against the chain
