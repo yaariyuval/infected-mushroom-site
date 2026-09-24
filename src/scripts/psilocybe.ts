@@ -229,12 +229,13 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
           float b = uT * ${BEAT};
           // the margin is thin and backlit: warm gold on cubensis, a cool amber on cyanescens
           // ...drifting slowly between gold and hot pink
-          vec3 rimC = mix(uCub > .5 ? vec3(1., .55, .15) : vec3(.95, .42, .25), vec3(1., .2, .6), .5 + .5 * sin(uT * .35 + uSeed + A));
+          vec3 rimC = mix(uCub > .5 ? vec3(1., .5, .1) : vec3(.95, .38, .2), vec3(1., .12, .62), .5 + .5 * sin(uT * .35 + uSeed + A));
           // the cap keeps its own colour under the grove's violet light
-          vec3 e = cap * (1. - isUnder) * .3 + rimC * fres * smoothstep(.5, 1., vU) * .55 * (1. - isUnder);
+          vec3 e = cap * (1. - isUnder) * .3 + rimC * fres * smoothstep(.4, 1., vU) * .85 * (1. - isUnder);
           // an oil-slick sheen where the cap turns away
           vec3 film = .5 + .5 * cos(6.2831853 * (fres * 1.5 + vU * .5 + uT * .03 + uSeed * .1 + vec3(0., .33, .67)));
-          e += film * pow(fres, 1.4) * .22 * (1. - isUnder);
+          film = film * film * vec3(1., .8, 1.2);   // saturated: colour, not a white wash
+          e += film * pow(fres, 1.1) * .5 * (1. - isUnder);
           // blue bruises glow and throb on the kick
           e += vec3(.05, .7, 1.2) * bruise * (.55 + .8 * uKick) * (1. - isUnder);
           // gills: a violet-cyan glow between the plates, a ripple running out to the margin every other beat
