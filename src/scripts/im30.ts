@@ -741,17 +741,11 @@ function makePaintedFist(src: string) {
   const tex = new THREE.TextureLoader().load(src);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
-  const ASPECT = 768 / 1032;
-  const HGT = 4.9, WID = HGT * ASPECT;
-  // the plane runs 60% past the painting's right edge; those UVs clamp to the last column, so the back of
-  // the hand keeps going off-screen instead of ending in a hard vertical cut
-  const EXT = 0.6;
-  const geo = new THREE.PlaneGeometry(WID * (1 + EXT), HGT, 32, 32);
-  geo.translate(WID * EXT / 2, 0, 0);
-  {
-    const uv = geo.attributes.uv as THREE.BufferAttribute;
-    for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * (1 + EXT));
-  }
+  // the texture is the painted fist (left 2/3) plus a painted continuation of the back of the hand
+  // falling into shadow (right 1/3), so there is never a hard edge where the cover's frame cut it
+  const PAINT = 1 / 1.5;
+  const HGT = 4.9, WID = HGT * (1024 / 864), PWID = WID * PAINT;
+  const geo = new THREE.PlaneGeometry(WID, HGT, 32, 32);
   const uniforms = { map: { value: tex }, uT: { value: 0 }, uKick: { value: 0 } };
   const mat = new THREE.ShaderMaterial({
     uniforms,
@@ -760,7 +754,7 @@ function makePaintedFist(src: string) {
       void main() {
         vUv = uv;
         vec3 p = position;
-        float tip = max(1. - uv.x, 0.);              // fingertips are on the left
+        float tip = max(1. - uv.x * 1.5, 0.);        // fingertips are on the left
         float fingerBand = sin(uv.y * 16.5);        // roughly one period per finger
         p.x += tip * tip * (.06 * sin(uT * .9 + uv.y * 3.) + .03 * fingerBand * sin(uT * 1.3));
         p.y += tip * .04 * sin(uT * .7 + uv.y * 5.);
@@ -770,19 +764,21 @@ function makePaintedFist(src: string) {
     fragmentShader: `
       uniform sampler2D map; uniform float uKick; varying vec2 vUv;
       void main() {
-        vec4 c = texture2D(map, vec2(min(vUv.x, .997), vUv.y));
+        vec4 c = texture2D(map, vUv);
         if (c.a < .02) discard;
         // pre-compensate the scene's filmic tone mapping so the paint keeps the cover's colours
         vec3 lin = min(c.rgb * 1.02, vec3(.9)) * (1. + .05 * uKick);   // keep whites under the bloom threshold
         gl_FragColor = vec4(lin, c.a);
       }`,
-    transparent: true, depthWrite: false,
+    // the fist always sits in front of the portal; its lower knuckles dip below floor level, so it must not be
+    // depth-tested against the ground (that clipped the thumb along a straight line)
+    transparent: true, depthWrite: false, depthTest: false,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.renderOrder = 5;
   const group = new THREE.Group();
   group.add(mesh);
-  return { group, mesh, uniforms, WID, HGT };
+  return { group, mesh, uniforms, WID, HGT, PWID };
 }
 
 /* ---------------------------------------------------- chains and figures */
@@ -1247,6 +1243,8 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
 
   const t0 = performance.now();
   let first = true;
+  let viewCorr = 0;
+  const edgeP = new THREE.Vector3();
   function frame(now: number) {
     const t = opts.still ? 14 : (now - t0) / 1000 + 4;
     const kick = opts.still ? 0.3 : Math.exp(-(((t * BPM) / 60) % 1) * 5);
@@ -1257,7 +1255,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     const ang = (portrait ? -0.62 : -0.74) + 0.08 * Math.sin(t * 0.07) + mx * 0.12;
     const dist = portrait ? 25 : 19.5;
     const C = new THREE.Vector3(1.0, portrait ? 0.6 : 1.5, 0);
-    const off = portrait ? 0.4 : Math.min(6.2, 3.4 * camera.aspect);
+    const off = (portrait ? 0.4 : Math.min(6.2, 3.4 * camera.aspect)) + viewCorr;
     camera.position.set(C.x + Math.sin(ang) * dist, (portrait ? 8 : 6.4) + my * 0.5 + 0.12 * Math.sin(t * 0.13), Math.cos(ang) * dist);
     target.set(C.x - Math.cos(ang) * off, C.y + my * 0.2, Math.sin(ang) * off);
     if (debug.cam) { camera.position.fromArray(debug.cam[0]); target.fromArray(debug.cam[1]); }
@@ -1293,6 +1291,16 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     fist.group.position.copy(anchor);
     fist.group.quaternion.copy(camera.quaternion);
     fist.mesh.position.set(fist.WID / 2 - 0.1, -0.25, 0);
+    // keep the painting's right edge at or past the screen edge: if it drifts on-screen, slide the view
+    fist.group.updateMatrixWorld();
+    let ndc = Infinity;
+    for (const yy of [0.42, 0, -0.38]) {
+      edgeP.set(-fist.WID / 2 + fist.PWID, yy * fist.HGT, 0);
+      fist.mesh.localToWorld(edgeP).project(camera);
+      ndc = Math.min(ndc, edgeP.x);
+    }
+    if (ndc < 1.05) viewCorr = Math.min(3, viewCorr + (1.05 - ndc) * 0.6);
+    else if (ndc > 1.25) viewCorr = Math.max(0, viewCorr - 0.01);
     fist.uniforms.uT.value = t;
     fist.uniforms.uKick.value = kick;
     figs.forEach((f, i) => {
