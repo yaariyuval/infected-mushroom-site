@@ -1,6 +1,6 @@
 // The IM30 cover's mushrooms, rebuilt for the night grove:
 // - trumpets: a thick, glossy, wavy hot-pink rim over a dark-blue fluted funnel streaked with cyan,
-//   running down into a glowing stem; light runs up the flutes on the beat, drips of light fall off the rim
+//   running down into a glowing stem; comets of light race up the flutes, drips of light fall off the rim
 // - the forest: amanita, parasol, wavy, liberty-cap and funnel mushrooms with glowing gills
 //   and a thin-film rainbow sheen on the caps
 import * as THREE from 'three';
@@ -123,7 +123,6 @@ export function makeTrumpet(o: TrumpetOpts): Trumpet {
     color: 0xffffff, vertexColors: true, roughness: 0.4, clearcoat: 0.6, clearcoatRoughness: 0.3,
     side: THREE.DoubleSide, envMapIntensity: 0.35,
   });
-  const beat = (BPM / 60).toFixed(4);
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, { uT: fungiTime, uKick: fungiKick, uLit: lit, uSeed: { value: seed }, uL: { value: L } });
     sh.vertexShader = sh.vertexShader
@@ -167,16 +166,13 @@ export function makeTrumpet(o: TrumpetOpts): Trumpet {
         {
           vec3 V = normalize(vViewPosition);
           float fres = pow(1. - abs(dot(normal, V)), 2.5);
-          float b = uT * ${beat};
-          // a swell of light rises from the throat to the rim every other beat
-          float swell = pow(fract(vHeight * 1.1 - b * .5), 6.);
           // comets racing up individual flutes, each on its own clock, some flutes resting
           float id = floor(ph / 6.2831853 + .5) + step(.5, stemK) * 50.;
           float r1 = fh(id + uSeed * 13.), r2 = fh(id * 1.7 + uSeed);
           float x = fract(vHeight * 1.5 - uT * (.22 + .3 * r1) + r2 * 7.);
           float comet = pow(x, 14.) * (1. - smoothstep(.985, 1., x)) * pow(crest, 3.) * step(.35, r2);
-          comet = mix(comet, .04 * swell, blur);
-          vec3 e = vec3(.02, .4, 1.) * flute * (.45 + 1.1 * swell + .3 * uKick)
+          comet *= 1. - blur;
+          vec3 e = vec3(.02, .4, 1.) * flute * (.6 + .3 * uKick)
                  + vec3(.35, 1.1, 1.6) * comet * 2.4 * foot
                  + vec3(0., .02, .14);
           // the cap: a thin, backlit pink lip with a glint drifting around it, flaring on the kick,

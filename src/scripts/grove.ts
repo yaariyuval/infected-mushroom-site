@@ -12,6 +12,7 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { rng, lerp, smooth, noise3, fbm2 } from './grove-util';
 import { BPM, NOISE_GLSL, fungiTime, fungiKick, makeTrumpet, makeForestShroom, type CapKind, type Trumpet, type ForestShroom } from './fungi';
+import { makePsilocybeCluster, type Psilocybe, type Species } from './psilocybe';
 
 const CYAN = new THREE.Color(0.05, 0.7, 1.0);
 const MAGENTA = new THREE.Color(1.0, 0.08, 0.6);
@@ -1216,9 +1217,36 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   trumpetLight.position.set(TX + 0.3, 3.2, TZ + 1.2);
   scene.add(trumpetLight);
 
+  /* Psilocybe clumps under the giant: cubensis to the left of its stem, cyanescens to the right.
+     On portrait screens that ground is behind the title, so they move up close to the lens instead. */
+  const psiloDefs: { sp: Species; seed: number; n: number; s: number; ps: number; land: [number, number]; port: [number, number]; ry: number }[] = [
+    { sp: 'cubensis', seed: 21, n: 6, s: 0.42, ps: 0.6, land: [-0.55, 3.5], port: [-1.05, 9.9], ry: 0.6 },
+    { sp: 'cyanescens', seed: 5, n: 8, s: 0.3, ps: 0.36, land: [0.75, 2.9], port: [0.8, 9.4], ry: -0.4 },
+  ];
+  const psilos = psiloDefs.map((d) => {
+    const c = makePsilocybeCluster(d.sp, d.seed, d.n, 0.9);
+    c.group.rotation.y = d.ry;
+    scene.add(c.group);
+    const sh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), shadowMat);
+    sh.rotation.x = -Math.PI / 2;
+    scene.add(sh);
+    const place = (portrait: boolean) => {
+      const [x, z] = portrait ? d.port : d.land;
+      const k = portrait ? d.ps : d.s;
+      c.group.scale.setScalar(k);
+      sh.scale.setScalar(k * 3);
+      c.group.position.set(x, groundH(x, z) - 0.02, z);
+      sh.position.set(x, groundH(x, z) + 0.03, z);
+      c.members.forEach((m) => (m.userData.d = fromOrigin(x, z)));
+    };
+    place(false);
+    return { ...c, place };
+  });
+
   const mycena = makeMycena(240, [
     ...amanitaDefs.slice(0, 4).map((d) => ({ x: d.x, z: d.z, r: 0.25 * d.r * d.s + 0.35 })),
     ...trumpetDefs.map((d) => ({ x: d.x, z: d.z, r: 0.5 * d.s + 0.3 })),
+    ...psiloDefs.flatMap((d) => [d.land, d.port].map(([x, z]) => ({ x, z, r: 0.35 }))),
     ...forest.filter((f) => f.d < 8).map((f) => ({ x: f.x, z: f.z, r: 0.3 * f.m.scale.x + 0.3 })),
   ]);
   scene.add(mycena.group);
@@ -1266,6 +1294,13 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   moon.moon.rotation.set(0.4, 0.8, 0.2);
   scene.add(moon.group);
 
+  if (debug.specimen) {
+    const c = makePsilocybeCluster(debug.specimen as Species, 5, debug.n ?? 6, 1);
+    c.group.position.set(0, groundH(0, 7), 7);
+    c.group.scale.setScalar(debug.ss ?? 0.3);
+    scene.add(c.group);
+  }
+
   // profiling hook: hide whole layers
   const skip: string[] = debug.skip || [];
   if (skip.includes('forest')) forest.forEach((f) => (f.m.visible = false));
@@ -1273,6 +1308,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   if (skip.includes('ground')) ground.visible = false;
   if (skip.includes('mycena')) mycena.group.visible = false;
   if (skip.includes('minis')) minis.forEach((f) => (f.m.visible = false));
+  if (skip.includes('psilos')) psilos.forEach((c) => (c.group.visible = false));
 
   // post: bloom for the bioluminescence, then the grade
   const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 2 }));
@@ -1301,6 +1337,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     shift = portrait ? -1.0 : -Math.min(2.9, 1.6 * (w / h));
     dist = portrait ? 16 : 11;
     placeMoon(portrait);
+    psilos.forEach((c) => c.place(portrait));
     renderer.setPixelRatio(pr);
     renderer.setSize(w, h, false);
     composer.setPixelRatio(pr);
@@ -1372,6 +1409,16 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
       cap.scale.set(br, 1 / Math.sqrt(br), br);
       (m.userData.gills as THREE.MeshBasicMaterial).color.setScalar((i === 0 ? pulse.value * 1.15 : 0.6 + 0.3 * kick) * litOf(d));
     });
+    psilos.forEach(({ members }) => members.forEach((m: Psilocybe, i) => {
+      const s = m.userData.seed;
+      const d = m.userData.d ?? 0;
+      m.userData.lit.value = litOf(d);
+      m.rotation.z = 0.025 * Math.sin(t * 0.5 + s * 1.3);
+      m.rotation.x = 0.02 * Math.sin(t * 0.41 + s);
+      const hop = i % 2 ? kick : Math.exp(-((((t * BPM) / 60 + 0.5) % 1) * 5));
+      m.userData.cap.scale.set(1 + 0.03 * hop, 1 - 0.04 * hop, 1 + 0.03 * hop);
+      m.userData.gills?.color.setScalar((0.8 + 0.5 * hop) * Math.min(1, litOf(d)));
+    }));
     minis.forEach(({ m, d }) => {
       const s = m.userData.seed as number;
       // they bounce on the kick, alternating
