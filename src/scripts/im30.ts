@@ -661,12 +661,12 @@ function makeFist(scale: number, seed: number, eyes: Eye[]) {
     const g = new THREE.Group();
     g.add(makeFinger(curve, R, skin, profile, [0.93, 1.0]));
     // a big eye near the fingertip on most fingers, smaller ones back on the knuckles
-    const big = [0.6, 0.5, 0.58, 0.62][i];
-    g.add(eyeOnFinger(curve, big, R, profile, toward, [1.2, 1.35, 1.25, 1.4][i], eyes, rand, 0, (rand() - 0.5) * 0.25));
-    // smaller, narrower eyes: toward the fingertip on some fingers, back toward the hand on others
-    if (i === 1) g.add(eyeOnFinger(curve, 0.72, R, profile, toward, 0.75, eyes, rand, 0.3, 0.2));
-    if (i === 0 || i === 3) g.add(eyeOnFinger(curve, 0.3, R, profile, toward, 0.95, eyes, rand, 0.2, (rand() - 0.5) * 0.3));
-    if (i === 2) g.add(eyeOnFinger(curve, 0.26, R, profile, toward, 0.8, eyes, rand, 0.35, 0));
+    // as on the cover: one eye per finger (staggered), two on the middle finger, and a couple of
+    // small ones back near the knuckles; small enough that they never overlap the next finger
+    const main = [0.46, 0.56, 0.36, 0.62][i];
+    g.add(eyeOnFinger(curve, main, R, profile, toward, i === 2 ? 0.85 : 0.75, eyes, rand, 0, (rand() - 0.5) * 0.2));
+    if (i === 2) g.add(eyeOnFinger(curve, 0.63, R, profile, toward, 0.5, eyes, rand, 0.2, 0.1));
+    if (i === 1 || i === 3) g.add(eyeOnFinger(curve, 0.11, R, profile, toward, 0.55, eyes, rand, 0.2, (rand() - 0.5) * 0.2));
     group.add(g);
     flex.push({ g, phase: rand() * 6, amp: 0.035 });
   });
