@@ -440,34 +440,41 @@ interface Eye { mat: THREE.ShaderMaterial; phase: number; lid: number }
 
 const EYE_VERT = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`;
 const EYE_FRAG = `
+  // Flat, painted eye as on the IM30 cover: a pointed almond with a thin maroon outline and blue wedge tips,
+  // a band of white around a big flat-blue iris that is wider than tall, a horizontal maroon pupil,
+  // a white dot and a white dash for highlights. uBlink lowers the upper lid straight across the iris.
   uniform vec2 uLook; uniform float uBlink; uniform float uAspect; varying vec2 vUv;
+  float aa(float d) { float w = fwidth(d) * .9 + 1e-4; return smoothstep(-w, w, d); }
   void main() {
     vec2 p = (vUv - .5) * 2.;
-    // pointed lemon shape; the corners taper into long points
     float x2 = min(p.x * p.x, 1.);
-    float up = .7 * pow(1. - x2, 1.15) * (1. - uBlink);
-    float lo = .6 * pow(1. - x2, 1.3);
-    float edge = min(up - p.y, p.y + lo);
-    float alpha = smoothstep(-.12, -.08, edge);
-    if (alpha <= 0.) discard;
-    // work in eye-space where 1 unit is the same size on both axes, so the iris stays round
-    vec2 q = vec2(p.x * uAspect, p.y);
-    vec2 look = uLook * vec2(.28 * uAspect, .1) * (1. - uBlink);
-    vec2 iq = q - look - vec2(0., .02);
-    float ir = length(iq);
-    vec3 col = vec3(.8, .82, .9);                                                          // white (kept under the bloom threshold)
-    col = mix(col, vec3(.45, .55, .9), smoothstep(.22, 0., edge));
-    col = mix(col, vec3(.22, .36, .92), smoothstep(.12, .3, uBlink) * .85);                // sleepy slits read blue, as on the cover                          // shadow under the lids
-    vec3 irisC = mix(vec3(.04, .16, .8), vec3(.25, .52, 1.), smoothstep(.12, .62, ir));   // big blue iris
-    irisC = mix(irisC, vec3(.06, .14, .6), smoothstep(.56, .71, ir));
-    col = mix(col, irisC, smoothstep(.74, .7, ir));
-    col = mix(col, vec3(.55, .07, .14), smoothstep(.2, .16, length(iq * vec2(.8, 1.1)))); // small maroon pupil
-    col = mix(col, vec3(1.), smoothstep(.1, .065, length(iq - vec2(-.26, .2))));        // glint
-    // blue liner running out into the pointed corners, dark rim along the lids
-    float corner = smoothstep(.55, .95, abs(p.x));
-    col = mix(col, vec3(.2, .35, 1.), corner * smoothstep(.25, 0., edge));
-    col = mix(vec3(.18, .02, .16), col, smoothstep(0., .08, edge + corner * .06));
-    gl_FragColor = vec4(col * .85, alpha);
+    float lid = clamp(uBlink, 0., 1.);
+    float up = .8 * pow(1. - x2, .8);
+    float lo = .7 * pow(1. - x2, 1.) * mix(1., .55, lid);
+    // the lowered upper lid is a nearly straight line, sagging slightly in the middle
+    float upL = mix(up, min(up, mix(.62, .05, lid) - .1 * (1. - x2)), step(.001, lid));
+    float edge = min(upL - p.y, p.y + lo);          // > 0 inside the eye
+    float inside = aa(edge + .1);                   // including the outline
+    if (inside <= 0.001) discard;
+    float open = aa(edge);
+    // iris: a wide oval that fills almost the full height; sleepy eyes show a wide band of it
+    vec2 ic = vec2(uLook.x * .18, -.03 + uLook.y * .05);
+    vec2 d = (p - ic) / vec2(mix(.5, .74, lid), mix(.56, .72, lid));
+    float ir = length(d);
+    float pr = length((p - ic) / vec2(.21, .22));
+    vec3 outline = vec3(.36, .02, .13);
+    vec3 col = vec3(.93, .95, 1.);                                                     // white
+    col = mix(col, vec3(.72, .8, 1.), aa(.1 - (upL - p.y)) * .5);                     // shade under the upper lid
+    col = mix(col, vec3(.21, .42, 1.), aa(1. - ir));                                   // flat blue iris
+    col = mix(col, vec3(.44, .05, .16), aa(1. - pr));                                  // maroon pupil
+    col = mix(col, vec3(.97), aa(1. - length((p - ic - vec2(-.23, .1)) / vec2(.045, .085))));  // dot highlight
+    col = mix(col, vec3(.97), aa(1. - length((p - ic - vec2(.33, .14)) / vec2(.1, .035))));    // dash highlight
+    // the white is a rounded oval; the almond's pointed ends beyond it are blue wedges
+    float oval = length(p / vec2(.8, .78));
+    col = mix(col, vec3(.2, .38, 1.), aa(oval - 1.));
+    col = mix(outline, col, open);
+    // colours above are authored in sRGB; the pipeline expects linear light
+    gl_FragColor = vec4(pow(col, vec3(2.2)) * .98, inside);
   }`;
 
 function makeEyeDecal(width: number, height: number, eyes: Eye[], rand: () => number, lid = 0) {
@@ -564,138 +571,230 @@ function eyeOnFinger(curve: THREE.CatmullRomCurve3, t: number, R: number, profil
 function skinMaterial() {
   return withGlow(new THREE.MeshPhysicalMaterial({
     color: 0xffffff, vertexColors: true, roughness: 0.46, clearcoat: 0.4, clearcoatRoughness: 0.25,
-    sheen: 1, sheenColor: new THREE.Color(1, 0.3, 0.7), sheenRoughness: 0.45,
+    sheen: 0.6, sheenColor: new THREE.Color(1, 0.3, 0.7), sheenRoughness: 0.5, fog: false,
   }), new THREE.Color(0.22, 0, 0.1), { value: 1 });
 }
 
 type Flexer = { g: THREE.Group; phase: number; amp: number };
 
-// Arc-length position of an eye measured in finger widths (D = 2R) from a reference point on the curve.
+// Direction from the hands toward the default camera, in the portal rig's local space. Eyes are projected
+// onto the fingers along this direction, so from the viewer they sit on the skin exactly as painted.
+const EYE_TOWARD = new THREE.Vector3(-12.1, 3.9, 14.4).normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), -TURN);
+
+type FingerOpts = {
+  H: number;               // half-thickness (vertical)
+  W: number;               // half-depth (toward / away from the viewer)
+  n: number;               // cross-section squareness: 2 = ellipse, higher = rounded box
+  profile: (t: number) => number;
+  topFlat?: number;        // 0..1, keeps the top edge straight while the finger tapers (beak / talon)
+  claw?: [number, number]; // where the skin fades to a dark claw point
+};
+
+function makeFingerMesh(curve: THREE.CatmullRomCurve3, o: FingerOpts, skin: THREE.Material) {
+  const TS = 90, RS = 32;
+  const pos = new Float32Array((TS + 1) * (RS + 1) * 3), col = new Float32Array((TS + 1) * (RS + 1) * 3), glow = new Float32Array((TS + 1) * (RS + 1));
+  const C = new THREE.Vector3(), T = new THREE.Vector3(), U = new THREE.Vector3(), S = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0);
+  const skinC = new THREE.Color(0.6, 0.035, 0.24), shade = new THREE.Color(0.28, 0.015, 0.22), clawC = new THREE.Color(0.02, 0.02, 0.1), c = new THREE.Color();
+  const e = 2 / o.n;
+  for (let i = 0; i <= TS; i++) {
+    const t = i / TS;
+    curve.getPointAt(t, C);
+    curve.getTangentAt(t, T);
+    U.copy(Y).addScaledVector(T, -T.dot(Y)).normalize();
+    S.crossVectors(T, U).normalize();
+    const k = o.profile(t);
+    const lift = (o.topFlat ?? 0) * o.H * (1 - k);
+    const ck = o.claw ? smooth(o.claw[0], o.claw[1], t) : 0;
+    for (let j = 0; j <= RS; j++) {
+      const a = (j / RS) * Math.PI * 2;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      const x = Math.sign(ca) * Math.pow(Math.abs(ca), e), y = Math.sign(sa) * Math.pow(Math.abs(sa), e);
+      const idx = i * (RS + 1) + j;
+      pos[idx * 3] = C.x + S.x * x * o.W * k + U.x * (y * o.H * k + lift);
+      pos[idx * 3 + 1] = C.y + S.y * x * o.W * k + U.y * (y * o.H * k + lift);
+      pos[idx * 3 + 2] = C.z + S.z * x * o.W * k + U.z * (y * o.H * k + lift);
+      c.copy(shade).lerp(skinC, smooth(0, 0.3, t)).lerp(clawC, ck);
+      col.set([c.r, c.g, c.b], idx * 3);
+      glow[idx] = 1 - ck;
+    }
+  }
+  const idx: number[] = [];
+  for (let i = 0; i < TS; i++) for (let j = 0; j < RS; j++) {
+    const a = i * (RS + 1) + j, b = a + RS + 1;
+    idx.push(a, b, a + 1, b, b + 1, a + 1);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  // weld the seam normals, then shade: undersides fall into shadow where the fingers press together
+  const nrm = geo.attributes.normal as THREE.BufferAttribute;
+  const v = new THREE.Vector3(), w = new THREE.Vector3();
+  for (let i = 0; i <= TS; i++) {
+    const a = i * (RS + 1), b = a + RS;
+    v.fromBufferAttribute(nrm, a).add(w.fromBufferAttribute(nrm, b)).normalize();
+    nrm.setXYZ(a, v.x, v.y, v.z); nrm.setXYZ(b, v.x, v.y, v.z);
+    for (let j = 0; j <= RS; j++) {
+      const q = a + j;
+      const kk = 0.4 + 0.6 * smooth(-0.8, 0.3, nrm.getY(q));
+      col[q * 3] *= kk; col[q * 3 + 1] *= kk; col[q * 3 + 2] *= kk * 1.05;
+      glow[q] *= kk;
+    }
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setAttribute('aGlow', new THREE.BufferAttribute(glow, 1));
+  return new THREE.Mesh(geo, skin);
+}
+
+type EyeSpec = { d: number; w: number; asp: number; lid: number; tilt: number; up?: number };
+const ray = new THREE.Raycaster();
+
+// Paint an eye onto `mesh`: a grid facing EYE_TOWARD, centred on the finger at arc position t (shifted
+// `up` finger-thicknesses across it), every vertex dropped onto the skin along the view direction.
+function projectEye(mesh: THREE.Mesh, curve: THREE.CatmullRomCurve3, t: number, D: number, e: EyeSpec, eyes: Eye[], rand: () => number) {
+  mesh.updateMatrixWorld(true);
+  const toward = EYE_TOWARD, back = toward.clone().negate();
+  const right = back.clone().cross(new THREE.Vector3(0, 1, 0)).normalize();
+  const upS = toward.clone().cross(right).normalize();
+  // eyes are painted level on screen (plus their own tilt), not along the finger's curl
+  const along = right.clone();
+  const upE = toward.clone().cross(along).normalize();
+  const hitAt = (o: THREE.Vector3) => { ray.set(o.clone().addScaledVector(toward, 30), back); const h = ray.intersectObject(mesh, false)[0]; return h; };
+  const centre0 = curve.getPointAt(t).clone().addScaledVector(upS, (e.up ?? 0) * D);
+  const hc = hitAt(centre0);
+  const centre = hc ? hc.point : centre0;
+  const w = e.w * D, h = w / e.asp;
+  const geo = new THREE.PlaneGeometry(w, h, 24, 10);
+  const p = geo.attributes.position as THREE.BufferAttribute;
+  const ct = Math.cos(e.tilt), st = Math.sin(e.tilt);
+  const o = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    const u0 = p.getX(i), v0 = p.getY(i);
+    const u = u0 * ct - v0 * st, v = u0 * st + v0 * ct;
+    o.copy(centre).addScaledVector(along, u).addScaledVector(upE, v);
+    const hit = hitAt(o);
+    if (hit && hit.face) o.copy(hit.point).addScaledVector(hit.face.normal, 0.012);
+    p.setXYZ(i, o.x, o.y, o.z);
+  }
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uLook: { value: new THREE.Vector2() }, uBlink: { value: e.lid }, uAspect: { value: e.asp } },
+    vertexShader: EYE_VERT, fragmentShader: EYE_FRAG,
+    transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, side: THREE.DoubleSide,
+  });
+  eyes.push({ mat, phase: rand() * 10, lid: e.lid });
+  return new THREE.Mesh(geo, mat);
+}
+
+// Arc-length position `dD` finger-thicknesses from reference position `refU` (negative = toward the root).
 function uFrom(curve: THREE.CatmullRomCurve3, refU: number, dD: number, D: number) {
   return THREE.MathUtils.clamp(refU + (dD * D) / curve.getLength(), 0.02, 0.98);
 }
-// the arc-length position of the curve's leftmost / rightmost point
 function uExtreme(curve: THREE.CatmullRomCurve3, sign: 1 | -1) {
   let best = 0, bx = Infinity;
   for (let i = 0; i <= 200; i++) { const u = i / 200; const x = sign * curve.getPointAt(u).x; if (x < bx) { bx = x; best = u; } }
   return best;
 }
-// eye width in finger widths -> eyeOnFinger's size parameter (which is in units of 1.25 D)
-const eyeSize = (wD: number) => wD / 1.25;
 
-type EyeSpec = { d: number; w: number; lid: number; tilt: number };
-
-// Left hand, measured off the cover: four heavy, beak-like talons reaching out of the dark to the left of
-// the arch; thick rounded bases, a near-straight taper to a sharp point, the last third dark navy.
-// Eyes on the thick base end facing the viewer (distances from the base end, in finger widths).
+// Left hand, from the cover: four heavy beak-like talons out of the dark to the left of the arch.
+// Thick rounded base, straight top edge, the underside sweeping up into a sharp point; last third navy.
+// Eyes on the thick base end (distances from the base, in finger thicknesses).
 function makeTalons(scale: number, seed: number, eyes: Eye[]) {
   const rand = rng(seed);
   const group = new THREE.Group();
   group.position.copy(PORTAL);
   const skin = skinMaterial();
-  const toward = new THREE.Vector3(Math.sin(-TURN), 0.05, Math.cos(-TURN)).normalize();
   const flex: Flexer[] = [];
-  const rows: { base: [number, number]; tip: [number, number]; R: number; eye: EyeSpec | null }[] = [
-    { base: [-2.85, 2.15], tip: [-1.45, 1.25], R: 0.5, eye: { d: 0.12, w: 0.55, lid: 0.5, tilt: 1.45 } },
-    { base: [-3.45, 0.85], tip: [-1.95, 0.25], R: 0.62, eye: { d: 0.4, w: 0.75, lid: 0.62, tilt: -0.15 } },
-    { base: [-3.35, -0.42], tip: [-1.6, -0.35], R: 0.6, eye: { d: 0.5, w: 0.95, lid: 0, tilt: 0 } },
-    { base: [-3.2, -1.4], tip: [-1.55, -1.0], R: 0.55, eye: null },
+  const rows: { base: [number, number]; tip: [number, number]; H: number; eye: EyeSpec | null }[] = [
+    { base: [-3.4, 2.4], tip: [-1.4, 1.1], H: 0.52, eye: { d: 0.3, w: 0.62, asp: 3.2, lid: 0.55, tilt: 1.35 } },
+    { base: [-4.05, 1.15], tip: [-1.85, 0.05], H: 0.64, eye: { d: 0.55, w: 0.95, asp: 3.3, lid: 0.62, tilt: -0.2 } },
+    { base: [-3.95, -0.15], tip: [-1.6, -0.75], H: 0.62, eye: { d: 0.6, w: 1.0, asp: 2.2, lid: 0, tilt: -0.05 } },
+    { base: [-3.75, -1.4], tip: [-1.6, -1.7], H: 0.56, eye: null },
   ];
   rows.forEach((row, i) => {
-    const R = row.R * scale, D = 2 * R;
+    const H = row.H * scale, D = 2 * H;
     const [bx, by] = row.base.map((v) => v * scale);
     const [tx, ty] = row.tip.map((v) => v * scale);
-    const z = 0.75 + (i % 2) * 0.1;
-    // slight arch along the top, so it reads as a beak rather than a cone
-    const pts = [0, 0.3, 0.6, 1].map((k) => new THREE.Vector3(lerp(bx, tx, k), lerp(by, ty, k) + 0.12 * Math.sin(Math.PI * k) * scale, z + 0.1 * Math.sin(Math.PI * k) - (k === 0 ? 0.15 : 0)));
+    const z = 0.7 + (i % 2) * 0.1;
+    const pts = [0, 0.33, 0.66, 1].map((k) => new THREE.Vector3(lerp(bx, tx, k), lerp(by, ty, k) + 0.08 * Math.sin(Math.PI * k) * scale, z + 0.12 * Math.sin(Math.PI * k) - (k === 0 ? 0.25 : 0)));
     const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4);
     const profile = (t: number) => {
-      const base = t < 0.05 ? Math.sqrt(t / 0.05) : 1;
-      const beak = 1.05 - 0.05 * t - 0.97 * Math.pow(smooth(0.18, 1, t), 1.1);
-      return Math.max(0.02, beak) * base;
+      const base = t < 0.1 ? Math.sqrt(t / 0.1) : 1;
+      return Math.max(0.015, 1.02 - 0.98 * Math.pow(smooth(0.3, 1, t), 0.95)) * base;
     };
+    const mesh = makeFingerMesh(curve, { H, W: H * 1.1, n: 2.8, profile, topFlat: 0.7, claw: [0.55, 0.63] }, skin);
     const g = new THREE.Group();
-    g.add(makeFinger(curve, R, skin, profile, [0.46, 0.76]));
-    if (row.eye) g.add(eyeOnFinger(curve, uFrom(curve, 0, row.eye.d, D), R, profile, toward, eyeSize(row.eye.w), eyes, rand, row.eye.lid, row.eye.tilt));
+    g.add(mesh);
+    if (row.eye) g.add(projectEye(mesh, curve, uFrom(curve, 0, row.eye.d, D), D, row.eye, eyes, rand));
     group.add(g);
-    flex.push({ g, phase: rand() * 6, amp: 0.035 });
+    flex.push({ g, phase: rand() * 6, amp: 0.03 });
   });
   function update(t: number) {
-    flex.forEach((f) => { f.g.rotation.z = -f.amp * (0.5 + 0.5 * Math.sin(t * 0.7 + f.phase)); f.g.rotation.y = 0.02 * Math.sin(t * 0.5 + f.phase); });
+    flex.forEach((f) => { f.g.rotation.z = -f.amp * (0.5 + 0.5 * Math.sin(t * 0.7 + f.phase)); });
   }
   return { group, update };
 }
 
-// Right hand, measured off the cover: a clenched fist of three thick fingers and a diagonal thumb, spaced
-// about 1.2 finger widths apart with dark gaps, rising gently to the right and running off-frame; the
-// rounded fingertips sit at the ring's right edge and fold down behind it. Eye distances are measured from
-// the fingertip (the finger's leftmost point), in finger widths.
+// Right hand, from the cover: a clenched fist of three thick fingers and a thumb, stacked with narrow dark
+// gaps, coming down from the upper right and curling over the ring's right edge at rounded tips.
+// Eye layout, top to bottom (distances from the fingertip in finger thicknesses):
+//   finger 1: a long sleepy eye;  knuckle eye further back
+//   finger 2: a small tilted slit at the tip and a big open eye behind it
+//   finger 3: a big open eye near the tip;  a sleepy knuckle eye further back
+//   thumb:    a long tilted slit
 function makeFist(scale: number, seed: number, eyes: Eye[]) {
   const rand = rng(seed);
   const group = new THREE.Group();
   group.position.copy(PORTAL);
   const skin = skinMaterial();
-  const toward = new THREE.Vector3(Math.sin(-TURN), 0.35, Math.cos(-TURN)).normalize();
   const flex: Flexer[] = [];
-  const X = RING_R + 0.45;
-  // back of the hand, falling into shadow behind the fingers and off to the right
-  {
-    const geo = new THREE.SphereGeometry(1, 40, 28);
-    const cnt = geo.attributes.position.count;
-    const col = new Float32Array(cnt * 3);
-    for (let i = 0; i < cnt; i++) col.set([0.45, 0.03, 0.26], i * 3);
-    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    geo.setAttribute('aGlow', new THREE.BufferAttribute(new Float32Array(cnt).fill(0.5), 1));
-    const back = new THREE.Mesh(geo, skin);
-    back.position.set(X + 3.3 * scale, -0.2 * scale, -0.25);
-    back.scale.set(1.35 * scale, 2.5 * scale, 0.75 * scale);
-    group.add(back);
-  }
-  const fingers: { y: number; eyes: EyeSpec[] }[] = [
-    { y: 0.95, eyes: [{ d: 1.0, w: 1.3, lid: 0.45, tilt: -0.08 }, { d: 2.6, w: 1.2, lid: 0, tilt: 0 }] },
-    { y: -0.25, eyes: [{ d: 0.47, w: 0.62, lid: 0.5, tilt: 0.55 }, { d: 1.85, w: 1.05, lid: 0, tilt: 0 }] },
-    { y: -1.45, eyes: [{ d: 0.58, w: 1.1, lid: 0, tilt: 0.05 }, { d: 2.5, w: 1.1, lid: 0.35, tilt: 0 }] },
+  const X = RING_R + 0.35;
+  const H = 0.56 * scale, D = 2 * H, GAP = 0.13 * D;
+  const rows: { y: number; H: number; eyes: EyeSpec[] }[] = [
+    { y: 1, H: 1, eyes: [{ d: 1.15, w: 1.3, asp: 3.6, lid: 0.55, tilt: -0.12 }, { d: 3.0, w: 1.1, asp: 2.3, lid: 0, tilt: -0.05 }] },
+    { y: 0, H: 1, eyes: [{ d: 0.42, w: 0.7, asp: 3.0, lid: 0.45, tilt: 0.62, up: 0.12 }, { d: 1.75, w: 1.0, asp: 2.35, lid: 0, tilt: -0.08 }] },
+    { y: -1, H: 1, eyes: [{ d: 0.62, w: 1.05, asp: 2.1, lid: 0, tilt: 0.12 }, { d: 2.75, w: 1.2, asp: 3.8, lid: 0.55, tilt: -0.05 }] },
   ];
-  fingers.forEach((f, i) => {
-    const R = 0.58 * scale, D = 2 * R;
-    const y = f.y * scale;
-    const z0 = 0.6 - i * 0.05;
+  rows.forEach((row, i) => {
+    const y = row.y * (D + GAP) + 0.1;
+    const z0 = 0.55;
     const pts = [
-      [X + 3.2, y + 1.4, 0.05], [X + 2.1, y + 0.9, z0 - 0.15], [X + 0.9, y + 0.35, z0 - 0.05],
-      [X + 0.1, y - 0.05, z0 + 0.08], [X - 0.25, y - 0.45, z0 - 0.15], [X - 0.05, y - 0.8, z0 - 0.55],
-    ].map(([x, yv, z]) => new THREE.Vector3(x, yv, z));
-    const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4);
-    const profile = (t: number) => {
-      const tip = t > 0.9 ? Math.sqrt(Math.max(0, 1 - Math.pow((t - 0.9) / 0.1, 2))) : 1;
-      return (1 - 0.08 * t) * tip;
-    };
-    const g = new THREE.Group();
-    g.add(makeFinger(curve, R, skin, profile, null));
-    const tipU = uExtreme(curve, 1);
-    f.eyes.forEach((e) => g.add(eyeOnFinger(curve, uFrom(curve, tipU, -e.d, D), R, profile, toward, eyeSize(e.w), eyes, rand, e.lid, e.tilt)));
-    group.add(g);
-    flex.push({ g, phase: rand() * 6, amp: 0.025 });
-  });
-  // thumb: along the bottom, rising diagonally to the right, with a long tilted slit
-  {
-    const R = 0.5 * scale, D = 2 * R;
-    const y = -2.55 * scale;
-    const pts = [
-      [X + 3.0, y + 1.5, 0.05], [X + 1.8, y + 0.8, 0.6], [X + 0.5, y + 0.15, 0.75], [X - 0.25, y - 0.1, 0.6], [X - 0.45, y - 0.3, 0.3],
+      [X + 3.5, y + 0.95, z0 - 0.25], [X + 2.3, y + 0.6, z0], [X + 1.1, y + 0.28, z0 + 0.06],
+      [X + 0.15, y + 0.05, z0 + 0.1], [X - 0.35, y - 0.32, z0 + 0.14], [X - 0.48, y - 0.78, z0 + 0.02],
     ].map(([x, yv, z]) => new THREE.Vector3(x, yv, z));
     const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4);
     const profile = (t: number) => {
       const tip = t > 0.88 ? Math.sqrt(Math.max(0, 1 - Math.pow((t - 0.88) / 0.12, 2))) : 1;
-      return (1 - 0.15 * t) * tip;
+      return (1 - 0.1 * smooth(0.3, 1, t) + 0.06 * Math.exp(-Math.pow((t - 0.72) / 0.1, 2))) * tip;
     };
+    const mesh = makeFingerMesh(curve, { H, W: H * 1.15, n: 3, profile }, skin);
     const g = new THREE.Group();
-    g.add(makeFinger(curve, R, skin, profile, null));
-    g.add(eyeOnFinger(curve, uFrom(curve, uExtreme(curve, 1), -1.5, D), R, profile, toward, eyeSize(1.05), eyes, rand, 0.6, 0.45));
+    g.add(mesh);
+    const tipU = uExtreme(curve, 1);
+    row.eyes.forEach((e) => g.add(projectEye(mesh, curve, uFrom(curve, tipU, -e.d, D), D, e, eyes, rand)));
     group.add(g);
     flex.push({ g, phase: rand() * 6, amp: 0.02 });
+  });
+  // thumb: along the bottom, rising diagonally to the right
+  {
+    const Ht = H * 0.9, Dt = 2 * Ht;
+    const y = -2 * (D + GAP) + 0.25;
+    const pts = [
+      [X + 3.2, y + 1.2, 0.1], [X + 1.9, y + 0.7, 0.6], [X + 0.6, y + 0.2, 0.72], [X - 0.25, y - 0.1, 0.7], [X - 0.55, y - 0.4, 0.5],
+    ].map(([x, yv, z]) => new THREE.Vector3(x, yv, z));
+    const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4);
+    const profile = (t: number) => {
+      const tip = t > 0.85 ? Math.sqrt(Math.max(0, 1 - Math.pow((t - 0.85) / 0.15, 2))) : 1;
+      return (1 - 0.15 * t) * tip;
+    };
+    const mesh = makeFingerMesh(curve, { H: Ht, W: Ht * 1.1, n: 3, profile }, skin);
+    const g = new THREE.Group();
+    g.add(mesh);
+    g.add(projectEye(mesh, curve, uFrom(curve, uExtreme(curve, 1), -1.6, Dt), Dt, { d: 1.6, w: 1.35, asp: 4.2, lid: 0.6, tilt: 0.45 }, eyes, rand));
+    group.add(g);
+    flex.push({ g, phase: rand() * 6, amp: 0.015 });
   }
   function update(t: number) {
-    flex.forEach((f) => { f.g.rotation.z = f.amp * Math.sin(t * 0.6 + f.phase); f.g.position.x = 0.03 * Math.sin(t * 0.8 + f.phase); });
+    flex.forEach((f) => { f.g.rotation.z = f.amp * Math.sin(t * 0.6 + f.phase); });
   }
   return { group, update };
 }
@@ -1132,7 +1231,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
 
   const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 2 }));
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.7, 0.4, 0.85);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.7, 0.4, 0.97);
   if (!debug.noBloom) composer.addPass(bloom);
   composer.addPass(new OutputPass());
 
