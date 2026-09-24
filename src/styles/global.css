@@ -239,6 +239,12 @@ img { display: block; max-width: 100%; }
   font-size: 1.125rem;
 }
 
+/* phones: keep the title block low and compact so it doesn't cover the mushrooms */
+@media (orientation: portrait) and (max-width: 640px) {
+  .hero .wrap { padding-block: 120px max(20px, env(safe-area-inset-bottom)); }
+  .hero-meta { margin-top: 20px; gap: 14px 24px; }
+}
+
 /* ---------- Sections ---------- */
 
 .section { padding-block: clamp(72px, 12vw, 150px); }

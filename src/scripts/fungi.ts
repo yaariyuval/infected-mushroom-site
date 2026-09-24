@@ -64,11 +64,11 @@ export function makeTrumpet(o: TrumpetOpts): Trumpet {
   const perSeg = Math.round(lerp(3, 6, detail));
   const prof = spline.getPoints((pts.length - 1) * perSeg);
   const rows = prof.length;
-  const segs = Math.round(lerp(72, 200, detail));
+  const segs = Math.round(lerp(72, 256, detail));
   const geo = new THREE.LatheGeometry(prof, segs);
   const p = geo.attributes.position as THREE.BufferAttribute;
-  const glow = new Float32Array(p.count), col = new Float32Array(p.count * 3);
-  const height = new Float32Array(p.count), rim = new Float32Array(p.count);
+  const col = new Float32Array(p.count * 3), under = new Float32Array(p.count);
+  const height = new Float32Array(p.count), rim = new Float32Array(p.count), prho = new Float32Array(p.count), py = new Float32Array(p.count);
 
   // the 2D profile normal at each row, to push the flutes out of the surface
   const rowN: THREE.Vector2[] = prof.map((_, i) => {
@@ -78,16 +78,17 @@ export function makeTrumpet(o: TrumpetOpts): Trumpet {
   const pn = (a: number, f: number, sd: number) => noise3(Math.cos(a) * f + sd * 7.3, Math.sin(a) * f, sd * 3.1) * 2 - 1;
   const c = new THREE.Color();
   const hot = new THREE.Color(1, 0.12, 0.5), pale = new THREE.Color(1, 0.55, 0.82), deepPink = new THREE.Color(0.6, 0.03, 0.3);
-  const navy = new THREE.Color(0.005, 0.015, 0.16), streak = new THREE.Color(0.03, 0.3, 0.8);
+  const navy = new THREE.Color(0.005, 0.015, 0.16);
   const span = L + 1.63;
   for (let i = 0; i < p.count; i++) {
     const row = i % rows;
     const isUnder = (row / (rows - 1)) * (pts.length - 1) <= underEnd;
     let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
     const rho = Math.hypot(x, z), a = Math.atan2(z, x);
-    // false gills: forked ridges running down the funnel, strongest out toward the rim
+    prho[i] = rho; py[i] = y;
+    // false gills: soft ridges running down the funnel (not the stem, where they'd be finer than a pixel)
     const ridgeA = a * 34 + Math.sin(y * 3 + seed) * 1.5;
-    const ridge = isUnder ? Math.pow(0.5 + 0.5 * Math.sin(ridgeA), 3) * smooth(0.2, 1.2, rho) * 0.045 * detail : 0;
+    const ridge = isUnder ? Math.pow(0.5 + 0.5 * Math.sin(ridgeA), 2) * smooth(0.45, 1.3, rho) * 0.04 * detail : 0;
     const flare = 1 + 0.09 * pn(a, 1.4, seed) * smooth(0.5, 1.7, rho);
     const n = rowN[row];
     const nx = (x / Math.max(rho, 1e-4)) * n.x, nz = (z / Math.max(rho, 1e-4)) * n.x;
@@ -100,42 +101,38 @@ export function makeTrumpet(o: TrumpetOpts): Trumpet {
     p.setXYZ(i, x, y, z);
     height[i] = hN;
     rim[i] = smooth(1.1, 1.74, rho) * (y > 0.5 ? 1 : 0);
-    if (isUnder) {
-      // thin cyan streaks on dark blue, brightening toward the throat, fading down the stem into the ground
-      const s1 = Math.pow(0.5 + 0.5 * Math.sin(ridgeA), 6);
-      const s2 = Math.pow(0.5 + 0.5 * Math.sin(a * 71 + seed), 10) * 0.6;
-      const throat = 1 - smooth(0.3, 1.35, rho);
-      const foot = lerp(0.18, 1, smooth(-L, 0.4, y));
-      const k = Math.min(1, (s1 + s2) * (0.5 + 0.5 * throat) + throat * 0.35) * foot;
-      glow[i] = k;
-      c.copy(navy).lerp(streak, k * 0.7);
-    } else {
+    under[i] = isUnder ? 1 : 0;
+    if (isUnder) c.copy(navy);
+    else {
       // glossy hot pink: pale where the rim rolls over, deeper toward the centre, painterly mottling
       const roll = smooth(1.35, 1.74, rho) * (1 - smooth(1.6, 1.66, y));
       c.copy(deepPink).lerp(hot, smooth(0.1, 1.2, rho)).lerp(pale, roll * 0.75 + 0.15 * noise3(x * 2.5, y * 2.5, z * 2.5));
     }
     col.set([c.r, c.g, c.b], i * 3);
   }
-  geo.setAttribute('aGlow', new THREE.BufferAttribute(glow, 1));
+  geo.setAttribute('aUnder', new THREE.BufferAttribute(under, 1));
   geo.setAttribute('aHeight', new THREE.BufferAttribute(height, 1));
   geo.setAttribute('aRim', new THREE.BufferAttribute(rim, 1));
+  geo.setAttribute('aRho', new THREE.BufferAttribute(prho, 1));
+  geo.setAttribute('aY', new THREE.BufferAttribute(py, 1));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   geo.computeVertexNormals();
 
   const lit = { value: 1 };
   const mat = new THREE.MeshPhysicalMaterial({
-    color: 0xffffff, vertexColors: true, roughness: 0.38, clearcoat: 0.7, clearcoatRoughness: 0.2,
+    color: 0xffffff, vertexColors: true, roughness: 0.4, clearcoat: 0.6, clearcoatRoughness: 0.3,
     side: THREE.DoubleSide, envMapIntensity: 0.35,
   });
+  const beat = (BPM / 60).toFixed(4);
   mat.onBeforeCompile = (sh) => {
-    sh.uniforms.uT = fungiTime;
-    sh.uniforms.uKick = fungiKick;
-    sh.uniforms.uLit = lit;
-    sh.uniforms.uSeed = { value: seed };
+    Object.assign(sh.uniforms, { uT: fungiTime, uKick: fungiKick, uLit: lit, uSeed: { value: seed }, uL: { value: L } });
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aGlow; attribute float aHeight; attribute float aRim;\nuniform float uT, uKick, uSeed;\nvarying float vGlow; varying float vHeight; varying float vRim;')
+      .replace('#include <common>', `#include <common>
+        attribute float aUnder, aHeight, aRim, aRho, aY;
+        uniform float uT, uKick, uSeed;
+        varying float vUnder, vHeight, vRim, vRho, vY, vAng;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-        vGlow = aGlow; vHeight = aHeight; vRim = aRim;
+        vUnder = aUnder; vHeight = aHeight; vRim = aRim; vRho = aRho; vY = aY; vAng = uv.x;
         {
           // the rim flutters like soft tissue, and the whole cap breathes on the beat
           float ang = atan(transformed.z, transformed.x);
@@ -143,18 +140,53 @@ export function makeTrumpet(o: TrumpetOpts): Trumpet {
           transformed.xz *= 1. + aRim * .035 * uKick;
         }`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uT, uKick, uLit;\nvarying float vGlow; varying float vHeight; varying float vRim;')
+      .replace('#include <common>', `#include <common>
+        uniform float uT, uKick, uLit, uSeed, uL;
+        varying float vUnder, vHeight, vRim, vRho, vY, vAng;
+        float fh(float n) { return fract(sin(n * 127.1) * 43758.5453); }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        // The flutes are drawn per pixel: 34 ridges plus hairline streaks, each melting into its average
+        // brightness once it gets finer than a pixel, so the stem never breaks up into jagged hatching.
+        float fA = vAng * 6.2831853;
+        // funnel: 34 flutes; down the stem they merge into 13 broad grooves
+        float stemK = smoothstep(.5, -.4, vY);
+        float phF = fA * 34. + sin(vY * 3. + uSeed) * 1.5, phS = fA * 13. + vY * .6 + uSeed;
+        float ph = mix(phF, phS, step(.5, stemK));
+        float blurF = smoothstep(.5, 2., fwidth(phF)), blurS = smoothstep(.5, 2., fwidth(phS));
+        float blur = mix(blurF, blurS, stemK);
+        float crest = mix(.5 + .5 * sin(phF), .5 + .5 * sin(phS), stemK);
+        float s1 = mix(mix(pow(.5 + .5 * sin(phF), 6.), .226, blurF), mix(pow(.5 + .5 * sin(phS), 3.), .31, blurS), stemK);
+        float ph2 = fA * 71. + uSeed;
+        float s2 = mix(pow(.5 + .5 * sin(ph2), 10.), .176, smoothstep(.5, 2., fwidth(ph2))) * .6;
+        float throat = 1. - smoothstep(.3, 1.35, vRho);
+        float foot = mix(.18, 1., smoothstep(-uL, .4, vY));
+        float flute = min(1., (s1 + s2) * (.5 + .5 * throat) + throat * .35) * foot;
+        float isUnder = step(.5, vUnder);
+        diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(.005, .015, .16), vec3(.03, .3, .8), flute * .7), isUnder);`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         {
-          // light running up the flutes from the stem to the rim, one pulse every other beat
-          float run = pow(fract(vHeight * 1.3 - uT * ${(BPM / 60).toFixed(4)} * .5), 5.);
-          float under = step(.001, vGlow);
           vec3 V = normalize(vViewPosition);
           float fres = pow(1. - abs(dot(normal, V)), 2.5);
-          vec3 e = vec3(.02, .4, 1.) * vGlow * (.55 + 1.3 * run + .3 * uKick) + vec3(0., .02, .14) * under;
-          // the pink lip is thin and backlit: it glows where it turns edge-on
-          e += (vec3(.16, 0., .07) + vec3(1., .12, .48) * fres * vRim * .55) * (1. - under);
-          totalEmissiveRadiance += e * uLit;
+          float b = uT * ${beat};
+          // a swell of light rises from the throat to the rim every other beat
+          float swell = pow(fract(vHeight * 1.1 - b * .5), 6.);
+          // comets racing up individual flutes, each on its own clock, some flutes resting
+          float id = floor(ph / 6.2831853 + .5) + step(.5, stemK) * 50.;
+          float r1 = fh(id + uSeed * 13.), r2 = fh(id * 1.7 + uSeed);
+          float x = fract(vHeight * 1.5 - uT * (.22 + .3 * r1) + r2 * 7.);
+          float comet = pow(x, 14.) * (1. - smoothstep(.985, 1., x)) * pow(crest, 3.) * step(.35, r2);
+          comet = mix(comet, .04 * swell, blur);
+          vec3 e = vec3(.02, .4, 1.) * flute * (.45 + 1.1 * swell + .3 * uKick)
+                 + vec3(.35, 1.1, 1.6) * comet * 2.4 * foot
+                 + vec3(0., .02, .14);
+          // the cap: a thin, backlit pink lip with a glint drifting around it, flaring on the kick,
+          // and an oil-slick sheen where the surface turns away
+          float glint = pow(.5 + .5 * sin(fA * 2. - uT * .7 + uSeed), 3.);
+          vec3 film = .5 + .5 * cos(6.2831853 * (fres * 1.4 + fA * .16 + uT * .03 + vec3(0., .33, .67)));
+          vec3 top = vec3(.16, 0., .07)
+                   + vec3(1., .12, .48) * fres * vRim * (.4 + .7 * glint + .35 * uKick)
+                   + film * pow(fres, 1.6) * .22;
+          totalEmissiveRadiance += mix(top, e, isUnder) * uLit;
         }`);
   };
   mat.customProgramCacheKey = () => 'trumpet';

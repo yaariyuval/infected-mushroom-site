@@ -28,6 +28,7 @@ function groundH(x: number, z: number) {
 
 const SKY_GLSL = /* glsl */ `
 uniform float uT;
+uniform vec3 uPL;
 varying vec3 vWorld;
 const vec3 MAGENTA = vec3(1., .22, .78);
 float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
@@ -42,19 +43,20 @@ void main() {
   vec3 c = mix(vec3(.055, .014, .15), vec3(.0015, .001, .012), pow(y, .3));
   c += MAGENTA * .1 * exp(-y * 16.);
 
-  vec2 nq = vec2(atan(rd.x, rd.z) * 2.2, y * 4.5);
+  // angles measured from straight ahead (-z), so the wrap-around seam sits behind the camera
+  vec2 nq = vec2(atan(rd.x, -rd.z) * 2.2, y * 4.5);
   float w = n2(nq * 1.3 + vec2(T * .025, -T * .012));
   float neb = fbm(nq * 1.6 + w * 1.8 - vec2(T * .018, 0.));
   vec3 nebC = mix(vec3(.35, .08, .6), vec3(.05, .35, .75), smoothstep(.35, .7, w));
   c += nebC * nebC * pow(neb, 2.8) * .5 * smoothstep(.04, .3, y);
 
-  vec2 st = vec2(atan(rd.x, rd.z), rd.y) * 110.;
+  vec2 st = vec2(atan(rd.x, -rd.z), rd.y) * 110.;
   vec2 id = floor(st), f = fract(st) - .5;
   float h = h21(id);
   c += vec3(.8, .85, 1.) * 2. * step(.986, h) * smoothstep(.1, 0., length(f)) * (.55 + .45 * sin(T * 1.5 + h * 60.)) * smoothstep(.04, .25, y);
 
 
-  vec3 PL = normalize(vec3(-.47, .27, -.84));
+  vec3 PL = uPL;
   float dd = dot(rd, PL);
   if (dd > .95) {
     vec3 pu = normalize(cross(PL, vec3(0, 1, 0)));
@@ -93,9 +95,12 @@ void main() {
   gl_FragColor = vec4(c, 1.);
 }`;
 
+// the ringed planet's direction in landscape; on portrait screens it follows the view like the moon
+const PLANET = new THREE.Vector3(-0.47, 0.27, -0.84).normalize();
+
 function makeSky() {
   const mat = new THREE.ShaderMaterial({
-    uniforms: { uT: { value: 0 } },
+    uniforms: { uT: { value: 0 }, uPL: { value: PLANET.clone() } },
     vertexShader: `varying vec3 vWorld; void main(){ vec4 w = modelMatrix * vec4(position, 1.); vWorld = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
     fragmentShader: SKY_GLSL,
     side: THREE.BackSide,
@@ -440,10 +445,10 @@ function makeMycena(count: number, avoid: { x: number; z: number; r: number }[])
     }
   }
   const tmp = new THREE.Color();
-  function update(t: number, kick: number, spread: number) {
+  function update(t: number, kick: number, spread: number, origin: THREE.Vector2) {
     for (let i = 0; i < count; i++) {
-      const d = where[i].length();
-      const rip = Math.pow(0.5 + 0.5 * Math.sin(d * 1.9 - t * 2.4), 3);
+      const d = where[i].distanceTo(origin);
+      const rip = Math.pow(0.5 + 0.5 * Math.sin(d * 1.1 - t * 1.4), 3);
       // dark until the infection reaches them, then a bright flash as it passes
       const lit = smooth(d, d + 1.5, spread), flash = Math.exp(-Math.pow((spread - d) * 0.9, 2));
       const k = (0.35 + 1.1 * rip + 0.25 * kick) * lit + 2.5 * flash;
@@ -837,13 +842,14 @@ function contactShadow() {
 
 /* ------------------------------------------------- ground + the mycelium */
 
-// Mushroom feet the mycelium pools around: x, z, reach, strength. [0] is the giant.
+// Mushroom feet the mycelium pools around: x, z, reach, strength.
 const MAX_SRC = 12;
 
 interface Infection {
   t: { value: number };
   kick: { value: number };
-  spread: { value: number };       // how far from the giant the infection has reached
+  origin: { value: THREE.Vector2 }; // where the infection starts: the trumpets' foot, back and to the left
+  spread: { value: number };       // how far from the origin the infection has reached
   ptr: { value: THREE.Vector3 };   // the pointer on the ground: x, z, strength
   src: { value: THREE.Vector4[] };
 }
@@ -866,13 +872,13 @@ function makeGround(inf: Infection) {
   g.computeVertexNormals();
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
   mat.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, { uT: inf.t, uKick: inf.kick, uSpread: inf.spread, uPtr: inf.ptr, uSrc: inf.src });
+    Object.assign(sh.uniforms, { uT: inf.t, uKick: inf.kick, uSpread: inf.spread, uPtr: inf.ptr, uSrc: inf.src, uOrigin: inf.origin });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWp;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWp = (modelMatrix * vec4(transformed, 1.)).xyz;');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-        uniform float uT, uKick, uSpread; uniform vec3 uPtr; uniform vec4 uSrc[${MAX_SRC}];
+        uniform float uT, uKick, uSpread; uniform vec2 uOrigin; uniform vec3 uPtr; uniform vec4 uSrc[${MAX_SRC}];
         varying vec3 vWp;
         ${NOISE_GLSL}
         vec2 h22(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * vec3(.1031, .103, .0973)); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.xx + p3.yz) * p3.zy); }
@@ -904,16 +910,19 @@ function makeGround(inf: Infection) {
           // energy pools around the mushrooms' feet
           float feed = 0.;
           for (int k = 0; k < ${MAX_SRC}; k++) { vec2 dv = q - uSrc[k].xy; feed += uSrc[k].w * exp(-dot(dv, dv) / (uSrc[k].z * uSrc[k].z)); }
-          float d0 = length(q - uSrc[0].xy);
-          // a pulse leaves the giant every other beat and runs out through the web
-          float ring = pow(fract(uT * ${(BPM / 120).toFixed(4)} - d0 * .07), 14.) * exp(-d0 * .06);
+          float d0 = length(q - uOrigin);
+          // a slow pulse leaves the trumpets every four beats and washes diagonally across the grove,
+          // its front bent and frayed by the moss
+          float dw = d0 + (n2(q * .22 + 5.) - .5) * 4.;
+          float wph = fract(uT * ${(BPM / 240).toFixed(4)} - dw * .09);
+          float ring = smoothstep(.55, .95, wph) * smoothstep(1., .96, wph) * exp(-d0 * .04);
           // the infection spreading out when the scene loads: dark ahead of it, a bright front
-          float lit = smoothstep(uSpread + .5, uSpread - 1.5, d0);
-          float front = exp(-pow((d0 - uSpread) * .8, 2.));
+          float lit = smoothstep(uSpread + .5, uSpread - 1.5, dw);
+          float front = exp(-pow((dw - uSpread) * .7, 2.));
           vec2 pv = q - uPtr.xy;
           float touch = uPtr.z * exp(-dot(pv, pv) * .28);
           vec3 tint = mix(vec3(.05, .75, 1.), vec3(1., .12, .62), smoothstep(.4, .65, n2(q * .12 + 11.)));
-          float energy = (.1 + feed * (1. + .3 * uKick) + 1.6 * ring) * lit + 3. * front + 4. * touch;
+          float energy = (.1 + feed * (1. + .3 * uKick) + 1.8 * ring) * lit + 3. * front + 4. * touch;
           totalEmissiveRadiance += tint * (net * energy + feed * lit * .04 + touch * .1 + front * .08);
         }`);
   };
@@ -1069,7 +1078,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   scene.add(rimLight);
 
   const inf: Infection = {
-    t: { value: 0 }, kick: { value: 0 }, spread: { value: 0 },
+    t: { value: 0 }, kick: { value: 0 }, spread: { value: 0 }, origin: { value: new THREE.Vector2() },
     ptr: { value: new THREE.Vector3(0, 0, 0) },
     src: { value: Array.from({ length: MAX_SRC }, () => new THREE.Vector4(0, 0, 1, 0)) },
   };
@@ -1086,6 +1095,10 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   };
 
   const pulse = { value: 1 };
+  // the trumpet cluster's foot; the infection starts here, so its waves cross the view at an angle
+  const TX = -4.1, TZ = -4.2;
+  inf.origin.value.set(TX, TZ);
+  const fromOrigin = (x: number, z: number) => Math.hypot(x - TX, z - TZ);
 
   /* the giant amanita: sculpted cap, raised warts, a hanging skirt, glowing gill plates */
   const amanitaDefs: (ShroomOpts & { x: number; y: number; z: number; s: number })[] = [
@@ -1103,11 +1116,10 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     m.rotation.y = d.seed * 1.7;
     scene.add(m);
     shadow(d.x, d.z, d.r * d.s * 1.3);
-    return { m, x: d.x, z: d.z, d: Math.hypot(d.x, d.z) };
+    return { m, x: d.x, z: d.z, d: fromOrigin(d.x, d.z) };
   });
 
   /* the IM30 trumpets: a towering cluster sprouting from one foot behind the giant, leaning apart */
-  const TX = -4.1, TZ = -4.2;
   const trumpetDefs = [
     { x: TX, z: TZ, L: 3.1, s: 1.15, bend: 0.35, tilt: 0.05, dir: 0.4, seed: 11, detail: 1 },
     { x: TX + 1.1, z: TZ - 0.6, L: 2.1, s: 0.92, bend: 0.5, tilt: 0.14, dir: -0.3, seed: 12, detail: 0.85 },
@@ -1125,7 +1137,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     holder.add(m);
     scene.add(holder);
     shadow(d.x, d.z, 1.1 * d.s);
-    return { m, x: d.x, z: d.z, d: Math.hypot(d.x, d.z) };
+    return { m, x: d.x, z: d.z, d: fromOrigin(d.x, d.z) };
   });
 
   /* the forest: the IM30 grove's caps, receding into the haze */
@@ -1153,7 +1165,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
       m.scale.setScalar(s);
       m.rotation.y = rand() * 6;
       scene.add(m);
-      forest.push({ m, x, z, d: Math.hypot(x, z) });
+      forest.push({ m, x, z, d: fromOrigin(x, z) });
     };
     const detail = d.detail ?? 0.5;
     add(makeForestShroom(d.kind, 300 + i, d.cap, d.gill, detail), d.x, d.z, d.s);
@@ -1181,7 +1193,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     m.position.set(d.x, groundH(d.x, d.z) - 0.02, d.z);
     m.rotation.y = i * 1.9;
     scene.add(m);
-    minis.push({ m, x: d.x, z: d.z, d: Math.hypot(d.x, d.z) });
+    minis.push({ m, x: d.x, z: d.z, d: fromOrigin(d.x, d.z) });
   });
 
   // the mycelium pools under the giant, the trumpets and the bigger mushrooms nearby
@@ -1235,10 +1247,14 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   const MOON_DIST = 200, MOON_R = MOON_DIST * Math.tan(THREE.MathUtils.degToRad(4));
   function placeMoon(portrait: boolean) {
     // landscape: the clear sky between the planet and the giant; portrait: above the giant
-    moonRel.set(portrait ? 0.07 : 0.15, portrait ? 0.39 : 0.3, -1).normalize();
+    moonRel.set(portrait ? 0.07 : 0.15, portrait ? 0.36 : 0.3, -1).normalize();
   }
+  let shift = -3, dist = 13, portrait = false;
+  const planetRel = new THREE.Vector3(-0.14, 0.25, -1).normalize();
   function aimMoon(yaw: number) {
     MOON_DIR.copy(moonRel).applyAxisAngle(Y, -yaw);
+    const pl = (sky.material as THREE.ShaderMaterial).uniforms.uPL.value as THREE.Vector3;
+    if (portrait) pl.copy(planetRel).applyAxisAngle(Y, -yaw); else pl.copy(PLANET);
     // light from the viewer's right and slightly behind the moon: the same fat crescent in either layout
     const right = new THREE.Vector3(-MOON_DIR.z, 0, MOON_DIR.x).normalize();
     sun.copy(right).multiplyScalar(0.85).add(new THREE.Vector3(0, 0.25, 0)).addScaledVector(MOON_DIR, 0.35).normalize();
@@ -1270,7 +1286,6 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   /* sizing + adaptive quality */
   let pr = debug.pr ?? Math.min(window.devicePixelRatio || 1, 1.25) * 0.75;
   const MAX_PR = Math.min(window.devicePixelRatio || 1, 1.5), MIN_PR = 0.45;
-  let shift = -3, dist = 13, portrait = false;
   const sizedPoints: [THREE.ShaderMaterial, number][] = [
     [spores.material as THREE.ShaderMaterial, 55], [moss.material as THREE.ShaderMaterial, 30],
     [ufo.moteMat, 45], [bokeh.material as THREE.ShaderMaterial, 650],
@@ -1321,7 +1336,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
 
     const ang = 0.2 * Math.sin(t * 0.06) + mx * 0.2;
     camera.position.set(Math.sin(ang) * dist, (portrait ? 1.4 : 1.9) + my * 0.4 + 0.15 * Math.sin(t * 0.08), Math.cos(ang) * dist);
-    target.set(shift, (portrait ? 2.3 : 2.6) + my * 0.2 + 0.1 * Math.sin(t * 0.11), 0);
+    target.set(shift, (portrait ? 2.0 : 2.6) + my * 0.2 + 0.1 * Math.sin(t * 0.11), 0);
     if (debug.cam) { camera.position.fromArray(debug.cam[0]); target.fromArray(debug.cam[1]); }
     camera.lookAt(target);
     camera.updateMatrixWorld();
@@ -1364,10 +1379,10 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
       (m.userData.cap as THREE.Object3D).scale.set(1 + 0.05 * hop, 1 - 0.07 * hop, 1 + 0.05 * hop);
       (m.userData.gills as THREE.MeshBasicMaterial).color.setScalar((0.85 + 0.5 * hop) * Math.min(1, litOf(d)));
     });
-    gillLight.intensity = (3.5 + 2.5 * kick) * Math.min(litOf(0), 1.5);
-    magentaLight.intensity = 2.5 * Math.min(litOf(3.5), 1.5);
-    trumpetLight.intensity = (3.5 + 2 * kick) * Math.min(litOf(3.8), 1.5);
-    mycena.update(t, kick, spread);
+    gillLight.intensity = (3.5 + 2.5 * kick) * Math.min(litOf(amanitas[0].d), 1.5);
+    magentaLight.intensity = 2.5 * Math.min(litOf(amanitas[1].d), 1.5);
+    trumpetLight.intensity = (3.5 + 2 * kick) * Math.min(litOf(0), 1.5);
+    mycena.update(t, kick, spread, inf.origin.value);
     ufo.update(t);
     for (const p of [spores, moss]) (p.material as THREE.ShaderMaterial).uniforms.uT.value = t;
     const bm = bokeh.material as THREE.ShaderMaterial;
