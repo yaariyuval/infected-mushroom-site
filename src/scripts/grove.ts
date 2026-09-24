@@ -123,22 +123,32 @@ interface ShroomOpts {
 }
 
 // Adds a per-vertex emissive term (translucent rim / underside) to a lit material.
-// With `sweep`, a band of brighter glow travels slowly around the mushroom.
-function withGlow<T extends THREE.MeshStandardMaterial>(mat: T, color: THREE.Color, strength: { value: number }, sweep = false) {
+// A slow swell travelling around the cap's margin; the cap and its gill plates both apply it so they stay joined.
+const MARGIN_WAVE = (r: number, seed: number) => `
+  {
+    float rhoW = length(transformed.xz);
+    float angW = atan(transformed.z, transformed.x);
+    transformed.y += smoothstep(${(0.55 * r).toFixed(3)}, ${r.toFixed(3)}, rhoW) * ${(0.03 * r).toFixed(4)} * sin(angW * 3. - uT * .55 + ${seed.toFixed(1)});
+  }`;
+
+// With `sweep`, a band of brighter glow travels slowly around the mushroom (and `wave` moves its margin).
+// `under` adds a second glow colour carried by an aUnderG attribute (the cap's underside, between the gills).
+function withGlow<T extends THREE.MeshStandardMaterial>(mat: T, color: THREE.Color, strength: { value: number }, sweep = false, wave = '', under?: THREE.Color) {
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uGlowC = { value: color };
     sh.uniforms.uGlowK = strength;
     sh.uniforms.uT = fungiTime;
+    sh.uniforms.uUnderC = { value: under ?? new THREE.Color(0, 0, 0) };
     // the sweep is evaluated per vertex: an angle interpolated across the lathe's seam would draw a line
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aGlow;\nuniform float uT;\nvarying float vGlow;')
-      .replace('#include <begin_vertex>', `#include <begin_vertex>
-        vGlow = aGlow${sweep ? ' * (1. + 1.6 * pow(.5 + .5 * sin(atan(position.z, position.x) * 2. - uT * .9), 6.))' : ''};`);
+      .replace('#include <common>', `#include <common>\nattribute float aGlow;\nuniform float uT;\nvarying float vGlow;${under ? '\nattribute float aUnderG;\nvarying float vUnderG;' : ''}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>${under ? '\nvUnderG = aUnderG;' : ''}
+        vGlow = aGlow${sweep ? ' * (1. + 1.6 * pow(.5 + .5 * sin(atan(position.z, position.x) * 2. - uT * .9), 6.))' : ''};${wave}`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform vec3 uGlowC;\nuniform float uGlowK;\nvarying float vGlow;')
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += uGlowC * vGlow * uGlowK;');
+      .replace('#include <common>', `#include <common>\nuniform vec3 uGlowC, uUnderC;\nuniform float uGlowK;\nvarying float vGlow;${under ? '\nvarying float vUnderG;' : ''}`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\ntotalEmissiveRadiance += uGlowC * vGlow * uGlowK${under ? ' + uUnderC * vUnderG * uGlowK' : ''};`);
   };
-  mat.customProgramCacheKey = () => (sweep ? 'glow-sweep' : 'glow');
+  mat.customProgramCacheKey = () => (sweep ? 'glow-sweep' : 'glow') + (under ? '-under' : '') + wave;
   return mat;
 }
 
@@ -184,7 +194,8 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
       x *= fib; z *= fib;
       x += bend * yy * yy * h;
       p.setXYZ(i, x, y, z);
-      glow[i] = Math.pow(yy, 4) * 0.15;
+      // the flare into the cap sits among the gills and glows with them
+      glow[i] = Math.pow(yy, 4) * 0.15 + 1.6 * smooth(h - 0.25 * r, h - 0.05 * r, y);
       const streak = noise3(Math.cos(a) * 4, y * 0.6, Math.sin(a) * 4);
       const k = lerp(0.35, 1, smooth(-0.3, 0.6, yy)) * (0.8 + 0.3 * streak);
       scol.set([0.95 * k, 0.78 * k, 0.9 * k], i * 3); // the gills above light the top of the stem
@@ -225,7 +236,7 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
     sk.setAttribute('aLow', new THREE.BufferAttribute(lowA, 1));
     sk.computeVertexNormals();
     const skMat = new THREE.MeshStandardMaterial({ color: 0xd9d0f5, roughness: 0.85, side: THREE.DoubleSide, emissive: 0x1a1238 });
-    // the hanging edge ripples like fabric in a draught, and flares out on the kick
+    // the hanging edge drifts like light fabric in a slow draught
     skMat.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, { uT: fungiTime, uKick: fungiKick, uSeed: { value: seed }, uR: { value: r }, uBx: { value: bx } });
       sh.vertexShader = sh.vertexShader
@@ -235,8 +246,8 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
             vec2 c = transformed.xz - vec2(uBx, 0.);
             float ang = atan(c.y, c.x);
             float lo = aLow * aLow;
-            transformed.y += lo * uR * (.035 * sin(ang * 5. + uT * 1.8 + uSeed) + .02 * sin(ang * 11. - uT * 2.7 + uSeed * 2.) - .03 * uKick);
-            transformed.xz = c * (1. + lo * (.06 * uKick + .025 * sin(ang * 3. - uT * 1.3))) + vec2(uBx, 0.);
+            transformed.y += lo * uR * (.018 * sin(ang * 4. + uT * .6 + uSeed) + .009 * sin(ang * 7. - uT * .9 + uSeed * 2.));
+            transformed.xz = c * (1. + lo * .014 * sin(ang * 3. - uT * .45 + uSeed)) + vec2(uBx, 0.);
           }`);
     };
     skMat.customProgramCacheKey = () => 'skirt';
@@ -293,6 +304,7 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
   {
     const p = capGeo.attributes.position as THREE.BufferAttribute;
     const glow = new Float32Array(p.count);
+    const underG = new Float32Array(p.count);
     const col = new Float32Array(p.count * 3);
     const deep = new THREE.Color(o.cap).multiplyScalar(0.8), light = new THREE.Color(o.cap).offsetHSL(0.02, 0.05, 0.12), c = new THREE.Color();
     for (let i = 0; i < p.count; i++) {
@@ -312,8 +324,10 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
       p.setXYZ(i, x, y, z);
       const isUnder = y < rimY + 0.2 * r && rho < 0.94 * r ? 1 : 0;
       glow[i] = smooth(0.9 * r, r, rho) * 0.6 + isUnder * 0.12;
+      underG[i] = (y < rimY + 0.28 * r && rho < 0.94 * r ? 1 : 0) * lerp(1, 0.4, smooth(0.1 * r, 0.9 * r, rho));
     }
     capGeo.setAttribute('aGlow', new THREE.BufferAttribute(glow, 1));
+    capGeo.setAttribute('aUnderG', new THREE.BufferAttribute(underG, 1));
     capGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     capGeo.computeVertexNormals();
   }
@@ -323,7 +337,9 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
       clearcoat: 0.8, clearcoatRoughness: 0.3,
       side: THREE.DoubleSide,
     }),
-    MAGENTA.clone().multiplyScalar(0.25), pulse, true,
+    MAGENTA.clone().multiplyScalar(0.25), pulse, true, o.detail > 0.5 ? MARGIN_WAVE(r, seed) : '',
+    // between the gill plates the underside glows with them instead of showing dark
+    CYAN.clone().lerp(new THREE.Color(0.4, 0.15, 1), 0.3).multiplyScalar(0.55),
   );
   capGroup.add(new THREE.Mesh(capGeo, capMat));
 
@@ -400,8 +416,8 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
     gm.onBeforeCompile = (sh) => {
       sh.uniforms.uT = fungiTime;
       sh.vertexShader = sh.vertexShader
-        .replace('#include <common>', '#include <common>\nattribute float aT, aEdge, aPlate, aAng;\nvarying float vT, vEdge, vPlate, vAng;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvT = aT; vEdge = aEdge; vPlate = aPlate; vAng = aAng;');
+        .replace('#include <common>', '#include <common>\nattribute float aT, aEdge, aPlate, aAng;\nuniform float uT;\nvarying float vT, vEdge, vPlate, vAng;')
+        .replace('#include <begin_vertex>', `#include <begin_vertex>\nvT = aT; vEdge = aEdge; vPlate = aPlate; vAng = aAng;${o.detail > 0.5 ? MARGIN_WAVE(r, seed) : ''}`);
       sh.fragmentShader = sh.fragmentShader
         .replace('#include <common>', '#include <common>\nuniform float uT;\nvarying float vT, vEdge, vPlate, vAng;')
         .replace('#include <color_fragment>', `#include <color_fragment>
@@ -415,7 +431,7 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
             diffuseColor.rgb += (vec3(.45, 1.15, 1.6) * comet * (.35 + .65 * vEdge) * 1.3 + diffuseColor.rgb * sweep * .7) * gate;
           }`);
     };
-    gm.customProgramCacheKey = () => 'gill-plates';
+    gm.customProgramCacheKey = () => 'gill-plates' + (o.detail > 0.5 ? MARGIN_WAVE(r, seed) : '');
     const gills = new THREE.Mesh(gg, gm);
     gills.userData.pulseMat = gm;
     capGroup.add(gills);
@@ -1226,8 +1242,9 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     { x: -9, y: -0.3, z: -14, s: 1.1, h: 3, r: 1.8, bend: 0.22, seed: 6, cap: 0x3a1a6e, glow: CYAN.clone().multiplyScalar(0.3), detail: 0.15 },
     { x: 14, y: -0.4, z: -20, s: 1.4, h: 2.6, r: 2.1, bend: -0.3, seed: 7, cap: 0x4d1a70, glow: MAGENTA.clone().multiplyScalar(0.3), detail: 0.12 },
   ];
+  const calm = { value: 1 }; // the amanitas' glow breathes slowly instead of following the kick
   const amanitas: Placed<THREE.Group>[] = amanitaDefs.map((d) => {
-    const m = makeMushroom(d, pulse);
+    const m = makeMushroom(d, calm);
     m.position.set(d.x, groundH(d.x, d.z) + d.y, d.z);
     m.scale.setScalar(d.s);
     m.rotation.y = d.seed * 1.7;
@@ -1336,7 +1353,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   /* Psilocybe clumps under the giant: cubensis to the left of its stem, cyanescens to the right.
      On portrait screens that ground is behind the title, so they move up close to the lens instead. */
   const psiloDefs: { sp: Species; seed: number; n: number; s: number; ps: number; land: [number, number]; port: [number, number]; ry: number }[] = [
-    { sp: 'cubensis', seed: 21, n: 6, s: 0.42, ps: 0.6, land: [-0.55, 3.5], port: [-0.8, 10.3], ry: 0.6 },
+    { sp: 'cubensis', seed: 21, n: 6, s: 0.42, ps: 0.48, land: [-0.55, 3.5], port: [-0.75, 10.3], ry: 0.6 },
     { sp: 'cyanescens', seed: 5, n: 8, s: 0.3, ps: 0.36, land: [0.75, 2.9], port: [0.8, 9.4], ry: -0.4 },
   ];
   const psilos = psiloDefs.map((d) => {
@@ -1478,11 +1495,11 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
 
   // warts light up one after another, a brief sparkle each
   const tw = new THREE.Color();
-  function twinkle(m: THREE.Object3D, t: number, kick: number) {
+  function twinkle(m: THREE.Object3D, t: number) {
     const warts = m.userData.warts as THREE.InstancedMesh | undefined;
     if (!warts) return;
     for (let j = 0; j < warts.count; j++) {
-      const k = 0.75 + 2.4 * Math.pow(Math.max(0, Math.sin(t * 1.1 + j * 2.39 + m.userData.seed)), 24) + 0.25 * kick;
+      const k = 0.8 + 2.2 * Math.pow(Math.max(0, Math.sin(t * 0.7 + j * 2.39 + m.userData.seed)), 16);
       warts.setColorAt(j, tw.setScalar(k));
     }
     warts.instanceColor!.needsUpdate = true;
@@ -1501,7 +1518,8 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     const spread = debug.spread ?? (opts.still || debug.lit ? 999 : Math.max(0, (now - litAt) / 1000 - 0.7) * 7);
     const litOf = (d: number) => smooth(d - 0.5, d + 1.5, spread) + 0.9 * Math.exp(-Math.pow((spread - d) * 0.7, 2));
 
-    const ang = 0.2 * Math.sin(t * 0.06) + mx * 0.2;
+    // a slow orbit; on portrait screens it's small, so the clumps close to the lens stay in frame
+    const ang = (portrait ? 0.05 : 0.2) * Math.sin(t * 0.06) + mx * (portrait ? 0.05 : 0.2);
     camera.position.set(Math.sin(ang) * dist, (portrait ? 1.4 : 1.9) + my * 0.4 + 0.15 * Math.sin(t * 0.08), Math.cos(ang) * dist);
     target.set(shift, (portrait ? 2.0 : 2.6) + my * 0.2 + 0.1 * Math.sin(t * 0.11), 0);
     if (debug.cam) { camera.position.fromArray(debug.cam[0]); target.fromArray(debug.cam[1]); }
@@ -1516,6 +1534,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     fungiTime.value = t;
     fungiKick.value = kick;
     pulse.value = 0.75 + 0.45 * kick;
+    calm.value = 0.95 + 0.25 * Math.sin(t * 0.8);
     trumpets.forEach(({ m, d }, i) => {
       const s = m.userData.seed;
       m.userData.lit.value = litOf(d);
@@ -1535,11 +1554,12 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
       m.rotation.z = 0.03 * Math.sin(t * 0.55 + s * 2.3) + 0.01 * Math.sin(t * 1.3 + s);
       m.rotation.x = 0.02 * Math.sin(t * 0.43 + s * 1.1);
       const cap = m.userData.cap as THREE.Group;
-      // the cap lags the stem a little, breathes, and dips on the kick
-      cap.rotation.x = 0.035 * Math.sin(t * 0.55 + s * 2.3 - 0.8);
-      const br = 1 + 0.025 * Math.sin(t * 0.9 + s * 2.3) + 0.015 * kick;
-      cap.scale.set(br, (1 - 0.03 * kick) / Math.sqrt(br), br);
-      twinkle(m, t, kick);
+      // the cap trails the stem's sway and breathes slowly; its margin rolls in the shader
+      cap.rotation.x = 0.03 * Math.sin(t * 0.55 + s * 2.3 - 0.9);
+      cap.rotation.y = 0.04 * Math.sin(t * 0.21 + s);
+      const br = 1 + 0.02 * Math.sin(t * 0.5 + s * 2.3);
+      cap.scale.set(br, 1 / Math.sqrt(br), br);
+      twinkle(m, t);
       const gk = (i === 0 ? pulse.value * 1.15 : 0.6 + 0.3 * kick) * litOf(d);
       (m.userData.gills as THREE.MeshBasicMaterial).color.setScalar(gk);
       (m.userData.hub as THREE.MeshBasicMaterial).color.setScalar(gk);
@@ -1562,7 +1582,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
       const gk = (0.85 + 0.5 * hop) * Math.min(1, litOf(d));
       (m.userData.gills as THREE.MeshBasicMaterial).color.setScalar(gk);
       (m.userData.hub as THREE.MeshBasicMaterial).color.setScalar(gk);
-      twinkle(m, t, kick);
+      twinkle(m, t);
     });
     gillLight.intensity = (3.5 + 2.5 * kick) * Math.min(litOf(amanitas[0].d), 1.5);
     magentaLight.intensity = 2.5 * Math.min(litOf(amanitas[1].d), 1.5);
