@@ -207,7 +207,7 @@ img { display: block; max-width: 100%; }
   inset: 0;
   z-index: -1;
   background: linear-gradient(90deg, rgb(12 9 32 / 0.75) 0%, rgb(12 9 32 / 0.25) 45%, transparent 65%),
-    linear-gradient(0deg, var(--spore) 0%, transparent 38%);
+    linear-gradient(0deg, var(--spore) 0%, rgb(12 9 32 / 0.5) 8%, transparent 30%);
   pointer-events: none;
 }
 .hero .wrap { padding-block: 120px clamp(40px, 8vh, 88px); }

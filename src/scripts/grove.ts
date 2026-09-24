@@ -1,51 +1,22 @@
-// Night grove hero scene: giant bioluminescent mushrooms under a violet sky.
+// Night grove hero scene: the IM30 cover's mushrooms under a violet sky.
+// A cluster of giant hot-pink trumpets glows over a forest of psychedelic caps; a mycelium network
+// under the moss carries the light between them, spreading out from the giant when the scene loads,
+// pulsing on the kick and following the pointer. Ringed planet, crescent moon, a saucer with a tractor beam.
 // Loaded lazily after first paint by MushroomScene.astro.
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { rng, lerp, smooth, noise3, fbm2 } from './grove-util';
+import { BPM, NOISE_GLSL, fungiTime, fungiKick, makeTrumpet, makeForestShroom, type CapKind, type Trumpet, type ForestShroom } from './fungi';
 
-const BPM = 145;
 const CYAN = new THREE.Color(0.05, 0.7, 1.0);
 const MAGENTA = new THREE.Color(1.0, 0.08, 0.6);
 const AMBER = new THREE.Color(1.0, 0.45, 0.08);
 
-/* ------------------------------------------------------------------ noise */
-
-function rng(seed: number) {
-  return () => {
-    seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-function hash(x: number, y: number, z = 0) {
-  let h = Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(z, 1440662683);
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
-}
-const fade = (t: number) => t * t * (3 - 2 * t);
-const lerp = THREE.MathUtils.lerp;
-const smooth = (a: number, b: number, x: number) => { const t = THREE.MathUtils.clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
-
-function noise3(x: number, y: number, z: number) {
-  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
-  const u = fade(x - xi), v = fade(y - yi), w = fade(z - zi);
-  const c = (a: number, b: number, d: number) => hash(xi + a, yi + b, zi + d);
-  return lerp(
-    lerp(lerp(c(0, 0, 0), c(1, 0, 0), u), lerp(c(0, 1, 0), c(1, 1, 0), u), v),
-    lerp(lerp(c(0, 0, 1), c(1, 0, 1), u), lerp(c(0, 1, 1), c(1, 1, 1), u), v),
-    w,
-  );
-}
-function fbm2(x: number, z: number, oct = 4) {
-  let s = 0, a = 0.5;
-  for (let i = 0; i < oct; i++) { s += a * noise3(x, z, i * 7.1); x = x * 2.03 + 17.1; z = z * 2.03 + 3.3; a *= 0.5; }
-  return s;
-}
 function groundH(x: number, z: number) {
   const base = 0.5 * fbm2(x * 0.3, z * 0.3) - 0.22;
   // keep the clearing under the giant fairly level
@@ -83,7 +54,7 @@ void main() {
   c += vec3(.8, .85, 1.) * 2. * step(.986, h) * smoothstep(.1, 0., length(f)) * (.55 + .45 * sin(T * 1.5 + h * 60.)) * smoothstep(.04, .25, y);
 
 
-  vec3 PL = vec3(-.397, .342, -.852);
+  vec3 PL = normalize(vec3(-.47, .27, -.84));
   float dd = dot(rd, PL);
   if (dd > .95) {
     vec3 pu = normalize(cross(PL, vec3(0, 1, 0)));
@@ -142,6 +113,7 @@ interface ShroomOpts {
   h: number; r: number; bend: number; seed: number;
   cap: THREE.ColorRepresentation; glow: THREE.Color;
   detail: number; // 0..1
+  wart?: THREE.ColorRepresentation;
 }
 
 // Adds a per-vertex emissive term (translucent rim / underside) to a lit material.
@@ -331,7 +303,7 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
     for (let i = 0; i < p.count; i++) if (p.getY(i) > rimY + 0.25 * r && n.getY(i) > 0.15) candidates.push(i);
     const count = Math.round(lerp(14, 70, o.detail));
     const wartGeo = new THREE.IcosahedronGeometry(1, 2);
-    const wartMat = new THREE.MeshStandardMaterial({ color: 0xf4e2f2, roughness: 0.9, emissive: 0xff8fe0, emissiveIntensity: 0.35 });
+    const wartMat = new THREE.MeshStandardMaterial({ color: o.wart ?? 0xf4e2f2, roughness: 0.9, emissive: o.wart ?? 0xff8fe0, emissiveIntensity: o.wart ? 0.5 : 0.35 });
     const warts = new THREE.InstancedMesh(wartGeo, wartMat, count);
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
     const pos = new THREE.Vector3(), nor = new THREE.Vector3(), scl = new THREE.Vector3();
@@ -468,11 +440,13 @@ function makeMycena(count: number, avoid: { x: number; z: number; r: number }[])
     }
   }
   const tmp = new THREE.Color();
-  function update(t: number, kick: number) {
+  function update(t: number, kick: number, spread: number) {
     for (let i = 0; i < count; i++) {
       const d = where[i].length();
       const rip = Math.pow(0.5 + 0.5 * Math.sin(d * 1.9 - t * 2.4), 3);
-      const k = 0.35 + 1.1 * rip + 0.25 * kick;
+      // dark until the infection reaches them, then a bright flash as it passes
+      const lit = smooth(d, d + 1.5, spread), flash = Math.exp(-Math.pow((spread - d) * 0.9, 2));
+      const k = (0.35 + 1.1 * rip + 0.25 * kick) * lit + 2.5 * flash;
       tmp.copy(base[i]).multiplyScalar(k);
       caps.setColorAt(i, tmp);
       stems.setColorAt(i, tmp);
@@ -860,7 +834,21 @@ function contactShadow() {
   return new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 1 });
 }
 
-function makeGround() {
+
+/* ------------------------------------------------- ground + the mycelium */
+
+// Mushroom feet the mycelium pools around: x, z, reach, strength. [0] is the giant.
+const MAX_SRC = 12;
+
+interface Infection {
+  t: { value: number };
+  kick: { value: number };
+  spread: { value: number };       // how far from the giant the infection has reached
+  ptr: { value: THREE.Vector3 };   // the pointer on the ground: x, z, strength
+  src: { value: THREE.Vector4[] };
+}
+
+function makeGround(inf: Infection) {
   const size = 140, seg = 180;
   const g = new THREE.PlaneGeometry(size, size, seg, seg);
   g.rotateX(-Math.PI / 2);
@@ -876,8 +864,146 @@ function makeGround() {
   }
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
   g.computeVertexNormals();
-  return new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }));
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
+  mat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, { uT: inf.t, uKick: inf.kick, uSpread: inf.spread, uPtr: inf.ptr, uSrc: inf.src });
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWp;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWp = (modelMatrix * vec4(transformed, 1.)).xyz;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform float uT, uKick, uSpread; uniform vec3 uPtr; uniform vec4 uSrc[${MAX_SRC}];
+        varying vec3 vWp;
+        ${NOISE_GLSL}
+        vec2 h22(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * vec3(.1031, .103, .0973)); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.xx + p3.yz) * p3.zy); }
+        // distance to the nearest cell wall (F2 - F1): a web of filaments
+        float web(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          float d1 = 8., d2 = 8.;
+          for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+            vec2 b = vec2(x, y), r = b + h22(i + b) - f;
+            float d = dot(r, r);
+            d2 = min(d2, max(d1, d)); d1 = min(d1, d);
+          }
+          return sqrt(d2) - sqrt(d1);
+        }`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        {
+          vec2 q = vWp.xz;
+          vec2 qw = q + (vec2(n2(q * .3), n2(q * .3 + 7.3)) - .5) * 3.2 + (vec2(n2(q * .9 + 3.), n2(q * .9 + 9.)) - .5) * 1.1;
+          // thick strands and, up close, a finer net of hyphae; each fades out before it would shimmer
+          float e1 = web(qw * .9);
+          float a1 = fwidth(e1);
+          float strand = (1. - smoothstep(0., .045 + a1 * .8, e1)) * mix(1., .35, smoothstep(.15, .9, a1));
+          float hypha = 0.;
+          if (a1 < .2) {
+            float e2 = web(qw * 2.6 + 4.1), a2 = fwidth(e2);
+            hypha = (1. - smoothstep(0., .03 + a2, e2)) * smoothstep(.4, .1, a2) * .5;
+          }
+          float net = max(strand, hypha) * (.3 + .7 * smoothstep(.3, .7, n2(q * .5 + 3.)));
+          // energy pools around the mushrooms' feet
+          float feed = 0.;
+          for (int k = 0; k < ${MAX_SRC}; k++) { vec2 dv = q - uSrc[k].xy; feed += uSrc[k].w * exp(-dot(dv, dv) / (uSrc[k].z * uSrc[k].z)); }
+          float d0 = length(q - uSrc[0].xy);
+          // a pulse leaves the giant every other beat and runs out through the web
+          float ring = pow(fract(uT * ${(BPM / 120).toFixed(4)} - d0 * .07), 14.) * exp(-d0 * .06);
+          // the infection spreading out when the scene loads: dark ahead of it, a bright front
+          float lit = smoothstep(uSpread + .5, uSpread - 1.5, d0);
+          float front = exp(-pow((d0 - uSpread) * .8, 2.));
+          vec2 pv = q - uPtr.xy;
+          float touch = uPtr.z * exp(-dot(pv, pv) * .28);
+          vec3 tint = mix(vec3(.05, .75, 1.), vec3(1., .12, .62), smoothstep(.4, .65, n2(q * .12 + 11.)));
+          float energy = (.1 + feed * (1. + .3 * uKick) + 1.6 * ring) * lit + 3. * front + 4. * touch;
+          totalEmissiveRadiance += tint * (net * energy + feed * lit * .04 + touch * .1 + front * .08);
+        }`);
+  };
+  return new THREE.Mesh(g, mat);
 }
+
+/* ------------------------------------------------------------ atmosphere */
+
+// Low-lying haze on top of the exponential fog: thickest at the ground, building with distance,
+// so the forest's feet sink into violet mist and the layers of the grove separate.
+function installHaze() {
+  const C = THREE.ShaderChunk;
+  if (C.fog_fragment.includes('vFogWorld')) return;
+  C.fog_pars_vertex = '#ifdef USE_FOG\n\tvarying float vFogDepth;\n\tvarying vec3 vFogWorld;\n#endif';
+  C.fog_vertex = '#ifdef USE_FOG\n\tvFogDepth = - mvPosition.z;\n\tvFogWorld = (inverse(viewMatrix) * mvPosition).xyz;\n#endif';
+  C.fog_pars_fragment = C.fog_pars_fragment.replace('varying float vFogDepth;', 'varying float vFogDepth;\n\tvarying vec3 vFogWorld;');
+  C.fog_fragment = `#ifdef USE_FOG
+	#ifdef FOG_EXP2
+		float fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );
+	#else
+		float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
+	#endif
+	float haze = exp( - max( vFogWorld.y + .15, 0. ) * 1.2 ) * ( 1. - exp( - vFogDepth * .06 ) );
+	gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );
+	gl_FragColor.rgb = mix( gl_FragColor.rgb, vec3( .05, .026, .13 ), haze * .6 );
+#endif`;
+}
+
+// Big, soft, out-of-focus motes drifting right in front of the lens.
+function makeBokeh(count: number) {
+  const rand = rng(515);
+  const pos = new Float32Array(count * 3), sd = new Float32Array(count), col = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const z = -lerp(1.6, 4.5, rand());
+    pos.set([(rand() - 0.5) * 2.4 * -z, (rand() - 0.5) * 1.3 * -z, z], i * 3);
+    sd[i] = rand();
+    const c = rand() > 0.55 ? MAGENTA : CYAN;
+    col.set([c.r, c.g, c.b], i * 3);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('aSeed', new THREE.BufferAttribute(sd, 1));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uT: { value: 0 }, uSize: { value: 100 }, uLit: { value: 0 } },
+    vertexShader: `
+      attribute float aSeed; attribute vec3 color; uniform float uT, uSize, uLit; varying float vA; varying vec3 vC;
+      void main() {
+        vec3 p = position;
+        p.x += sin(uT * .11 + aSeed * 30.) * .25;
+        p.y += sin(uT * .09 + aSeed * 17.) * .18 + mod(uT * .03 * (.5 + aSeed), 1.2) - .6;
+        vec4 mv = modelViewMatrix * vec4(p, 1.);
+        gl_Position = projectionMatrix * mv;
+        gl_PointSize = uSize * (.6 + fract(aSeed * 7.)) / -mv.z;
+        vA = uLit * (.35 + .65 * (.5 + .5 * sin(uT * .6 + aSeed * 40.))) * (.4 + .6 * fract(aSeed * 13.));
+        vC = color;
+      }`,
+    fragmentShader: `
+      varying float vA; varying vec3 vC;
+      void main() {
+        float d = length(gl_PointCoord - .5) * 2.;
+        float disc = smoothstep(1., .86, d);
+        float a = disc * (.55 + .45 * smoothstep(.55, .92, d));   // brighter rim, like a lens's bokeh
+        gl_FragColor = vec4(vC * a * vA * .05, 1.);
+      }`,
+    blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, depthTest: false,
+  });
+  const pts = new THREE.Points(g, mat);
+  pts.frustumCulled = false;
+  pts.renderOrder = 10;
+  return pts;
+}
+
+// Final grade, after tone mapping: lens fringing toward the corners, vignette, fine film grain.
+const GradeShader = {
+  uniforms: { tDiffuse: { value: null }, uT: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
+  fragmentShader: `
+    uniform sampler2D tDiffuse; uniform float uT; uniform vec2 uRes; varying vec2 vUv;
+    float h(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+    void main() {
+      vec2 d = vUv - .5;
+      float r2 = dot(d, d);
+      vec2 off = d * r2 * .014;
+      vec3 c = vec3(texture2D(tDiffuse, vUv + off).r, texture2D(tDiffuse, vUv).g, texture2D(tDiffuse, vUv - off).b);
+      c *= mix(1., .6, smoothstep(.1, .55, r2 * 1.5));
+      c += (h(vUv * uRes + fract(uT * 7.) * 91.) - .5) * .03;
+      gl_FragColor = vec4(c, 1.);
+    }`,
+};
 
 function figure(height: number) {
   const g = new THREE.Group();
@@ -886,6 +1012,7 @@ function figure(height: number) {
   body.position.y = height * 0.4;
   const head = new THREE.Mesh(new THREE.SphereGeometry(height * 0.1, 12, 10), mat);
   head.position.y = height * 0.86;
+  head.rotation.x = -0.4;
   g.add(body, head);
   return g;
 }
@@ -894,17 +1021,21 @@ function figure(height: number) {
 
 export interface GroveHandle { stop(): void }
 
+type Placed<T> = { m: T; x: number; z: number; d: number };
+
 export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirstFrame?: () => void }): GroveHandle {
   const debug = (window as any).__groveDebug || {}; // screenshot/benchmark hook
+  installHaze();
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', alpha: false });
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.95;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(0x1a0b36, 0.028);
+  scene.fog = new THREE.FogExp2(0x1a0b36, 0.026);
 
   const camera = new THREE.PerspectiveCamera(33, 1, 0.1, 400);
+  scene.add(camera);
 
   // sky + environment reflections baked from it
   const sky = makeSky();
@@ -914,6 +1045,12 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     const envSky = makeSky();
     (envSky.material as THREE.ShaderMaterial).uniforms.uT.value = 10;
     envScene.add(envSky);
+    // a hot-pink and a cyan panel so the glossy caps pick up the grove's colours
+    const pink = new THREE.Mesh(new THREE.PlaneGeometry(40, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.2, 0.15, 0.6), side: THREE.DoubleSide }));
+    pink.position.set(-30, 14, -20); pink.lookAt(0, 0, 0);
+    const cyan = new THREE.Mesh(new THREE.PlaneGeometry(40, 10), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.1, 0.9, 1.4), side: THREE.DoubleSide }));
+    cyan.position.set(0, -12, 20); cyan.lookAt(0, 0, 0);
+    envScene.add(pink, cyan);
     const pmrem = new THREE.PMREMGenerator(renderer);
     scene.environment = pmrem.fromScene(envScene, 0, 0.1, 400).texture;
     scene.environmentIntensity = 0.3;
@@ -927,53 +1064,164 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   const key = new THREE.DirectionalLight(0x9a6cff, 0.8);
   key.position.set(-6, 5, 7);
   scene.add(key);
+  const rimLight = new THREE.DirectionalLight(0xff4fb0, 0.7);
+  rimLight.position.set(6, 6, -8);
+  scene.add(rimLight);
 
-  scene.add(makeGround());
+  const inf: Infection = {
+    t: { value: 0 }, kick: { value: 0 }, spread: { value: 0 },
+    ptr: { value: new THREE.Vector3(0, 0, 0) },
+    src: { value: Array.from({ length: MAX_SRC }, () => new THREE.Vector4(0, 0, 1, 0)) },
+  };
+  const ground = makeGround(inf);
+  scene.add(ground);
   if (debug.expose) (window as any).__groveScene = scene;
+  const shadowMat = contactShadow();
+  const shadow = (x: number, z: number, r: number) => {
+    const sh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), shadowMat);
+    sh.rotation.x = -Math.PI / 2;
+    sh.position.set(x, groundH(x, z) + 0.03, z);
+    sh.scale.setScalar(r);
+    scene.add(sh);
+  };
 
   const pulse = { value: 1 };
-  const shroomDefs: (ShroomOpts & { x: number; y: number; z: number; s: number })[] = [
+
+  /* the giant amanita: sculpted cap, raised warts, a hanging skirt, glowing gill plates */
+  const amanitaDefs: (ShroomOpts & { x: number; y: number; z: number; s: number })[] = [
     { x: 0, y: -0.1, z: 0, s: 1, h: 3, r: 2, bend: 0.12, seed: 1, cap: 0x5c0a55, glow: CYAN.clone().multiplyScalar(0.5), detail: 1 },
-    { x: -3.4, y: -0.05, z: 1.4, s: 0.55, h: 2.4, r: 1.6, bend: -0.28, seed: 2, cap: 0x4a1f9e, glow: CYAN.clone().multiplyScalar(0.4), detail: 0.7 },
     { x: 2.9, y: -0.1, z: -1.9, s: 0.8, h: 3.1, r: 1.4, bend: 0.3, seed: 3, cap: 0x6c1a8f, glow: MAGENTA.clone().multiplyScalar(0.4), detail: 0.7 },
+    { x: -3.6, y: -0.05, z: 1.2, s: 0.5, h: 2.4, r: 1.6, bend: -0.28, seed: 2, cap: 0x4a1f9e, glow: CYAN.clone().multiplyScalar(0.4), detail: 0.6 },
     { x: 2.1, y: -0.05, z: 2.3, s: 0.3, h: 2, r: 1.7, bend: 0.1, seed: 4, cap: 0x9a2170, glow: CYAN.clone().multiplyScalar(0.4), detail: 0.45 },
-    { x: -1.5, y: -0.05, z: 3, s: 0.22, h: 2.2, r: 1.3, bend: -0.2, seed: 5, cap: 0x3f2a9c, glow: CYAN.clone().multiplyScalar(0.4), detail: 0.35 },
-    { x: -21, y: -0.6, z: -40, s: 1.7, h: 3.2, r: 1.8, bend: 0.22, seed: 6, cap: 0x3a1a6e, glow: CYAN.clone().multiplyScalar(0.3), detail: 0.1 },
-    { x: 17, y: -0.6, z: -34, s: 1.5, h: 2.6, r: 2.1, bend: -0.3, seed: 7, cap: 0x4d1a70, glow: MAGENTA.clone().multiplyScalar(0.3), detail: 0.1 },
+    { x: -9, y: -0.3, z: -14, s: 1.1, h: 3, r: 1.8, bend: 0.22, seed: 6, cap: 0x3a1a6e, glow: CYAN.clone().multiplyScalar(0.3), detail: 0.15 },
+    { x: 14, y: -0.4, z: -20, s: 1.4, h: 2.6, r: 2.1, bend: -0.3, seed: 7, cap: 0x4d1a70, glow: MAGENTA.clone().multiplyScalar(0.3), detail: 0.12 },
   ];
-  const shadowMat = contactShadow();
-  const shrooms = shroomDefs.map((d) => {
+  const amanitas: Placed<THREE.Group>[] = amanitaDefs.map((d) => {
     const m = makeMushroom(d, pulse);
     m.position.set(d.x, groundH(d.x, d.z) + d.y, d.z);
     m.scale.setScalar(d.s);
     m.rotation.y = d.seed * 1.7;
     scene.add(m);
-    const sh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), shadowMat);
-    sh.rotation.x = -Math.PI / 2;
-    sh.position.set(d.x, groundH(d.x, d.z) + 0.03, d.z);
-    sh.scale.setScalar(d.r * d.s * 1.3);
-    scene.add(sh);
-    return m;
+    shadow(d.x, d.z, d.r * d.s * 1.3);
+    return { m, x: d.x, z: d.z, d: Math.hypot(d.x, d.z) };
   });
-  // the giant's gills light the grove
+
+  /* the IM30 trumpets: a towering cluster sprouting from one foot behind the giant, leaning apart */
+  const TX = -4.1, TZ = -4.2;
+  const trumpetDefs = [
+    { x: TX, z: TZ, L: 3.1, s: 1.15, bend: 0.35, tilt: 0.05, dir: 0.4, seed: 11, detail: 1 },
+    { x: TX + 1.1, z: TZ - 0.6, L: 2.1, s: 0.92, bend: 0.5, tilt: 0.14, dir: -0.3, seed: 12, detail: 0.85 },
+    { x: TX - 0.9, z: TZ + 0.6, L: 1.2, s: 0.66, bend: 0.45, tilt: 0.2, dir: 2.9, seed: 13, detail: 0.7 },
+    { x: TX + 0.7, z: TZ + 0.9, L: 0.4, s: 0.34, bend: 0.2, tilt: 0.1, dir: -0.9, seed: 14, detail: 0.45 },
+  ];
+  const trumpets: Placed<Trumpet>[] = trumpetDefs.map((d) => {
+    const m = makeTrumpet({ seed: d.seed, stem: d.L, bend: d.bend, detail: d.detail });
+    m.scale.setScalar(d.s);
+    m.rotation.z = -d.tilt;
+    const holder = new THREE.Group(); // turns the trumpet's lean (+x) toward `dir`
+    holder.rotation.y = -d.dir;
+    holder.position.set(d.x, groundH(d.x, d.z) - 0.02, d.z);
+    m.position.y = d.L * d.s;           // the stem's foot sits on the ground
+    holder.add(m);
+    scene.add(holder);
+    shadow(d.x, d.z, 1.1 * d.s);
+    return { m, x: d.x, z: d.z, d: Math.hypot(d.x, d.z) };
+  });
+
+  /* the forest: the IM30 grove's caps, receding into the haze */
+  const G = (r: number, g: number, b: number) => new THREE.Color(r, g, b);
+  const forestDefs: { x: number; z: number; s: number; kind: CapKind; cap: number; gill: THREE.Color; young?: number; detail?: number }[] = [
+    { x: -6.2, z: -2.5, s: 0.85, kind: 'liberty', cap: 0x6a3aa0, gill: G(0.2, 0.9, 1), young: 2, detail: 0.7 },
+    { x: 5.4, z: -3.5, s: 0.8, kind: 'parasol', cap: 0x8a2a6a, gill: G(0.2, 0.8, 1.1), young: 1, detail: 0.7 },
+    { x: -2.9, z: 3.1, s: 0.3, kind: 'wavy', cap: 0x8a1a8a, gill: G(0.1, 0.8, 1.1), detail: 0.6 },
+    { x: 3.4, z: 1.2, s: 0.32, kind: 'funnel', cap: 0x1a4aa0, gill: G(0.2, 1, 0.9), detail: 0.6 },
+    { x: -9.5, z: -7, s: 1.2, kind: 'wavy', cap: 0x8a1a8a, gill: G(0.1, 0.8, 1.1), young: 2 },
+    { x: 1.5, z: -9, s: 1.0, kind: 'funnel', cap: 0xb0206a, gill: G(0.2, 1, 1), young: 1 },
+    { x: 7.5, z: -8, s: 1.3, kind: 'wavy', cap: 0x3a1a9a, gill: G(1, 0.35, 0.85), young: 1 },
+    { x: -4.5, z: -11, s: 1.5, kind: 'liberty', cap: 0x7a2a9a, gill: G(1, 0.4, 0.9), young: 1 },
+    { x: 11, z: -12, s: 1.7, kind: 'parasol', cap: 0x5a1a8a, gill: G(0.2, 0.9, 1) },
+    { x: -15, z: -12, s: 1.8, kind: 'parasol', cap: 0x8a2a6a, gill: G(0.2, 0.8, 1.1), detail: 0.35 },
+    { x: 4, z: -17, s: 1.9, kind: 'liberty', cap: 0x6a3aa0, gill: G(0.2, 0.9, 1), detail: 0.35 },
+    { x: -20, z: -24, s: 2.6, kind: 'wavy', cap: 0x3a1a6e, gill: G(0.2, 0.8, 1.1), detail: 0.25 },
+    { x: 22, z: -26, s: 2.8, kind: 'liberty', cap: 0x4d1a70, gill: G(1, 0.35, 0.85), detail: 0.25 },
+  ];
+  const rand = rng(909);
+  const forest: Placed<ForestShroom>[] = [];
+  forestDefs.forEach((d, i) => {
+    const add = (m: ForestShroom, x: number, z: number, s: number) => {
+      m.position.set(x, groundH(x, z) - 0.05, z);
+      m.scale.setScalar(s);
+      m.rotation.y = rand() * 6;
+      scene.add(m);
+      forest.push({ m, x, z, d: Math.hypot(x, z) });
+    };
+    const detail = d.detail ?? 0.5;
+    add(makeForestShroom(d.kind, 300 + i, d.cap, d.gill, detail), d.x, d.z, d.s);
+    // young ones clustered at its foot
+    const kinds: CapKind[] = ['liberty', 'wavy', 'funnel', 'parasol'];
+    for (let k = 0; k < (d.young ?? 0); k++) {
+      const a = rand() * Math.PI * 2, dist = d.s * lerp(0.8, 1.4, rand());
+      add(makeForestShroom(kinds[Math.floor(rand() * kinds.length)], 400 + i * 5 + k, d.cap, d.gill, detail * 0.6),
+        d.x + Math.cos(a) * dist, d.z + Math.sin(a) * dist, d.s * lerp(0.28, 0.45, rand()));
+    }
+  });
+
+  /* little purple mushrooms with red warts, huddled at the trumpets' foot and the giant's */
+  const minis: Placed<THREE.Group>[] = [];
+  [
+    { x: TX - 1.4, z: TZ + 1.4, s: 0.3 }, { x: TX - 1.0, z: TZ + 1.8, s: 0.22 }, { x: TX - 1.8, z: TZ + 1.7, s: 0.17 },
+    { x: TX + 1.6, z: TZ + 1.0, s: 0.24 }, { x: -1.9, z: 1.6, s: 0.2 }, { x: -1.5, z: 2.0, s: 0.15 },
+    { x: 1.6, z: 1.7, s: 0.18 },
+  ].forEach((d, i) => {
+    const m = makeMushroom({
+      h: 1.1, r: 1.25, bend: i % 2 ? 0.1 : -0.1, seed: 80 + i, cap: 0x7a3cc0,
+      glow: CYAN.clone().multiplyScalar(0.9), detail: 0.5, wart: 0xff2a3c,
+    }, pulse);
+    m.scale.setScalar(d.s);
+    m.position.set(d.x, groundH(d.x, d.z) - 0.02, d.z);
+    m.rotation.y = i * 1.9;
+    scene.add(m);
+    minis.push({ m, x: d.x, z: d.z, d: Math.hypot(d.x, d.z) });
+  });
+
+  // the mycelium pools under the giant, the trumpets and the bigger mushrooms nearby
+  const feet = [
+    { x: 0, z: 0.1, r: 2.2, w: 0.9 },
+    { x: TX, z: TZ, r: 2, w: 0.8 },
+    ...amanitas.slice(1, 4).map((f) => ({ x: f.x, z: f.z, r: 1.2 * f.m.scale.x + 0.3, w: 0.5 })),
+    ...forest.filter((f) => f.d < 14 && f.m.scale.x > 0.7).map((f) => ({ x: f.x, z: f.z, r: 0.9 * f.m.scale.x, w: 0.4 })),
+  ].slice(0, MAX_SRC);
+  feet.forEach((f, i) => inf.src.value[i].set(f.x, f.z, f.r, f.w));
+
+  // the giant's gills and the trumpets' funnels light the grove
   const gillLight = new THREE.PointLight(CYAN, 4, 12, 2);
   gillLight.position.set(0.9, 1.4, 1.2);
   scene.add(gillLight);
   const magentaLight = new THREE.PointLight(MAGENTA, 2.5, 8, 2);
   magentaLight.position.set(2.9, 1.7, -1.9);
   scene.add(magentaLight);
+  const trumpetLight = new THREE.PointLight(new THREE.Color(0.1, 0.55, 1), 4, 11, 2);
+  trumpetLight.position.set(TX + 0.3, 3.2, TZ + 1.2);
+  scene.add(trumpetLight);
 
-  const mycena = makeMycena(240, shroomDefs.slice(0, 5).map((d) => ({ x: d.x, z: d.z, r: 0.25 * d.r * d.s + 0.35 })));
+  const mycena = makeMycena(240, [
+    ...amanitaDefs.slice(0, 4).map((d) => ({ x: d.x, z: d.z, r: 0.25 * d.r * d.s + 0.35 })),
+    ...trumpetDefs.map((d) => ({ x: d.x, z: d.z, r: 0.5 * d.s + 0.3 })),
+    ...forest.filter((f) => f.d < 8).map((f) => ({ x: f.x, z: f.z, r: 0.3 * f.m.scale.x + 0.3 })),
+  ]);
   scene.add(mycena.group);
 
   const f1 = figure(0.62), f2 = figure(0.5);
-  f1.position.set(-1.25, groundH(-1.25, 1.9), 1.9);
-  f2.position.set(-0.8, groundH(-0.8, 2.15), 2.15);
+  f1.position.set(-1.35, groundH(-1.35, 2.3), 2.3);
+  f2.position.set(-0.95, groundH(-0.95, 2.55), 2.55);
+  f1.rotation.y = 0.3; f2.rotation.y = -0.2;
   scene.add(f1, f2);
 
   const spores = makeSpores(260, new THREE.Vector3(18, 7, 12), new THREE.Vector3(-1, -0.2, 0), 7, 0.25);
   const moss = makeSpores(350, new THREE.Vector3(12, 0.25, 7), new THREE.Vector3(-0.5, -0.15, 1.2), 11, 0.0);
   scene.add(spores, moss);
+  const bokeh = makeBokeh(14);
+  camera.add(bokeh);
 
   const ufo = makeUfo();
   scene.add(ufo.group);
@@ -1002,73 +1250,139 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   moon.moon.rotation.set(0.4, 0.8, 0.2);
   scene.add(moon.group);
 
-  // post: bloom for the bioluminescence
+  // profiling hook: hide whole layers
+  const skip: string[] = debug.skip || [];
+  if (skip.includes('forest')) forest.forEach((f) => (f.m.visible = false));
+  if (skip.includes('trumpets')) trumpets.forEach((f) => (f.m.visible = false));
+  if (skip.includes('ground')) ground.visible = false;
+  if (skip.includes('mycena')) mycena.group.visible = false;
+  if (skip.includes('minis')) minis.forEach((f) => (f.m.visible = false));
+
+  // post: bloom for the bioluminescence, then the grade
   const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 2 }));
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.75, 0.35, 0.8);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.8, 0.4, 0.78);
   if (!debug.noBloom) composer.addPass(bloom);
   composer.addPass(new OutputPass());
+  const grade = new ShaderPass(GradeShader);
+  if (!debug.noGrade) composer.addPass(grade);
 
   /* sizing + adaptive quality */
   let pr = debug.pr ?? Math.min(window.devicePixelRatio || 1, 1.25) * 0.75;
   const MAX_PR = Math.min(window.devicePixelRatio || 1, 1.5), MIN_PR = 0.45;
-  let shift = -3, dist = 13;
+  let shift = -3, dist = 13, portrait = false;
+  const sizedPoints: [THREE.ShaderMaterial, number][] = [
+    [spores.material as THREE.ShaderMaterial, 55], [moss.material as THREE.ShaderMaterial, 30],
+    [ufo.moteMat, 45], [bokeh.material as THREE.ShaderMaterial, 650],
+    ...trumpets.flatMap((t) => t.m.userData.points.map((m) => [m, 34] as [THREE.ShaderMaterial, number])),
+  ];
   function resize() {
     const w = canvas.clientWidth, h = canvas.clientHeight;
     if (!w || !h) return;
-    const portrait = h > w;
+    portrait = h > w;
     camera.aspect = w / h;
     camera.fov = portrait ? 46 : 31;
     camera.updateProjectionMatrix();
-    shift = portrait ? 0.3 : -Math.min(2.9, 1.6 * (w / h));
-    dist = portrait ? 14 : 11;
+    shift = portrait ? -1.0 : -Math.min(2.9, 1.6 * (w / h));
+    dist = portrait ? 16 : 11;
     placeMoon(portrait);
     renderer.setPixelRatio(pr);
     renderer.setSize(w, h, false);
     composer.setPixelRatio(pr);
     composer.setSize(w, h);
-    (spores.material as THREE.ShaderMaterial).uniforms.uSize.value = 55 * pr * (h / 800);
-    (moss.material as THREE.ShaderMaterial).uniforms.uSize.value = 30 * pr * (h / 800);
-    ufo.moteMat.uniforms.uSize.value = 45 * pr * (h / 800);
+    grade.uniforms.uRes.value.set(w * pr, h * pr);
+    for (const [m, k] of sizedPoints) m.uniforms.uSize.value = k * pr * (h / 800);
   }
 
-  let mx = 0, my = 0, tx = 0, ty = 0;
-  const onMove = (e: PointerEvent) => { tx = e.clientX / innerWidth - 0.5; ty = 0.5 - e.clientY / innerHeight; };
+  // the pointer: parallax, and where it touches the ground the mycelium lights up
+  let mx = 0, my = 0, tx = 0, ty = 0, over = 0;
+  const ndc = new THREE.Vector2(), ray = new THREE.Raycaster(), floor = new THREE.Plane(Y, 0), hit = new THREE.Vector3();
+  const touch = new THREE.Vector3(0, 0, 0), touchGoal = new THREE.Vector3(0, 0, 0);
+  const onMove = (e: PointerEvent) => {
+    tx = e.clientX / innerWidth - 0.5; ty = 0.5 - e.clientY / innerHeight;
+    const r = canvas.getBoundingClientRect();
+    ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    over = Math.abs(ndc.y) <= 1 ? 1 : 0;
+  };
   addEventListener('pointermove', onMove, { passive: true });
 
   const t0 = performance.now();
   const target = new THREE.Vector3();
-  let first = true;
+  let first = true, litAt = 0;
   function frame(now: number) {
-    const t = opts.still ? 18 : (now - t0) / 1000 + 6;
+    const t = debug.t ?? (opts.still ? 18 : (now - t0) / 1000 + 6);
     const kick = opts.still ? 0.3 : Math.exp(-(((t * BPM) / 60) % 1) * 5);
     mx += (tx - mx) * 0.03; my += (ty - my) * 0.03;
 
+    // the infection spreads out from the giant once the scene has faded in
+    if (first) litAt = now;
+    const spread = debug.spread ?? (opts.still || debug.lit ? 999 : Math.max(0, (now - litAt) / 1000 - 0.7) * 7);
+    const litOf = (d: number) => smooth(d - 0.5, d + 1.5, spread) + 0.9 * Math.exp(-Math.pow((spread - d) * 0.7, 2));
+
     const ang = 0.2 * Math.sin(t * 0.06) + mx * 0.2;
-    camera.position.set(Math.sin(ang) * dist, 1.25 + my * 0.4 + 0.15 * Math.sin(t * 0.08), Math.cos(ang) * dist);
-    target.set(shift, (dist > 14 ? 2.1 : 2.7) + my * 0.2 + 0.1 * Math.sin(t * 0.11), 0);
+    camera.position.set(Math.sin(ang) * dist, (portrait ? 1.4 : 1.9) + my * 0.4 + 0.15 * Math.sin(t * 0.08), Math.cos(ang) * dist);
+    target.set(shift, (portrait ? 2.3 : 2.6) + my * 0.2 + 0.1 * Math.sin(t * 0.11), 0);
     if (debug.cam) { camera.position.fromArray(debug.cam[0]); target.fromArray(debug.cam[1]); }
     camera.lookAt(target);
+    camera.updateMatrixWorld();
     sky.position.copy(camera.position);
     aimMoon(Math.atan2(target.x - camera.position.x, camera.position.z - target.z));
     moon.group.position.copy(camera.position).addScaledVector(MOON_DIR, MOON_DIST);
     moon.moon.rotation.y = 0.8 + t * 0.004;
     (sky.material as THREE.ShaderMaterial).uniforms.uT.value = t;
 
+    fungiTime.value = t;
+    fungiKick.value = kick;
     pulse.value = 0.75 + 0.45 * kick;
-    shrooms.forEach((m, i) => {
+    trumpets.forEach(({ m, d }, i) => {
+      const s = m.userData.seed;
+      m.userData.lit.value = litOf(d);
+      m.rotation.x = 0.012 * Math.sin(t * 0.43 + s * 1.1);
+      m.rotation.y = 0.05 * Math.sin(t * 0.2 + i);
+    });
+    forest.forEach(({ m, d }) => {
+      const s = m.userData.seed;
+      m.userData.lit.value = litOf(d);
+      m.rotation.z = 0.02 * Math.sin(t * 0.45 + s);
+      m.rotation.x = 0.015 * Math.sin(t * 0.37 + s * 1.3);
+      const br = 1 + 0.025 * Math.sin(t * 0.8 + s);
+      m.userData.cap.scale.set(br, 1 / Math.sqrt(br), br);
+    });
+    amanitas.forEach(({ m, d }, i) => {
       const s = m.userData.seed as number;
       m.rotation.z = 0.018 * Math.sin(t * 0.55 + s * 2.3);
       m.rotation.x = 0.012 * Math.sin(t * 0.43 + s * 1.1);
       const cap = m.userData.cap as THREE.Group;
       const br = 1 + 0.02 * Math.sin(t * 0.9 + s * 2.3);
       cap.scale.set(br, 1 / Math.sqrt(br), br);
-      (m.userData.gills as THREE.MeshBasicMaterial).color.setScalar(i === 0 ? pulse.value * 1.15 : 0.6 + 0.3 * kick);
+      (m.userData.gills as THREE.MeshBasicMaterial).color.setScalar((i === 0 ? pulse.value * 1.15 : 0.6 + 0.3 * kick) * litOf(d));
     });
-    gillLight.intensity = 3.5 + 2.5 * kick;
-    mycena.update(t, kick);
+    minis.forEach(({ m, d }) => {
+      const s = m.userData.seed as number;
+      // they bounce on the kick, alternating
+      const hop = s % 2 ? kick : Math.exp(-((((t * BPM) / 60 + 0.5) % 1) * 5));
+      (m.userData.cap as THREE.Object3D).scale.set(1 + 0.05 * hop, 1 - 0.07 * hop, 1 + 0.05 * hop);
+      (m.userData.gills as THREE.MeshBasicMaterial).color.setScalar((0.85 + 0.5 * hop) * Math.min(1, litOf(d)));
+    });
+    gillLight.intensity = (3.5 + 2.5 * kick) * Math.min(litOf(0), 1.5);
+    magentaLight.intensity = 2.5 * Math.min(litOf(3.5), 1.5);
+    trumpetLight.intensity = (3.5 + 2 * kick) * Math.min(litOf(3.8), 1.5);
+    mycena.update(t, kick, spread);
     ufo.update(t);
     for (const p of [spores, moss]) (p.material as THREE.ShaderMaterial).uniforms.uT.value = t;
+    const bm = bokeh.material as THREE.ShaderMaterial;
+    bm.uniforms.uT.value = t;
+    bm.uniforms.uLit.value = Math.min(1, spread / 10);
+
+    // pointer on the ground: follow it smoothly, fade in only while it's over the scene and hits nearby ground
+    ray.setFromCamera(ndc, camera);
+    const onGround = over && ray.ray.intersectPlane(floor, hit) && hit.distanceTo(camera.position) < 26;
+    if (onGround) touchGoal.set(hit.x, hit.z, 1); else touchGoal.z = 0;
+    touch.x += (touchGoal.x - touch.x) * 0.12; touch.y += (touchGoal.y - touch.y) * 0.12;
+    touch.z += (touchGoal.z - touch.z) * 0.05;
+    inf.ptr.value.copy(touch);
+    inf.t.value = t; inf.kick.value = kick; inf.spread.value = spread;
+    grade.uniforms.uT.value = t;
 
     composer.render();
     if (first) { first = false; opts.onFirstFrame?.(); }
@@ -1082,6 +1396,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
       acc += now - last;
       if (++samples === 40) {
         const avg = acc / samples;
+        (window as any).__groveFrame = avg;
         if (debug.pr) {}
         else if (avg > 24 && pr > MIN_PR) { pr = Math.max(MIN_PR, pr * 0.85); resize(); }
         else if (avg < 17 && pr < MAX_PR) { pr = Math.min(MAX_PR, pr * 1.1); resize(); }

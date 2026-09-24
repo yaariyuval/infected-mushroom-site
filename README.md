@@ -51,17 +51,19 @@ npm run build    # outputs to dist/
 | Links, bio, settings | `src/data/site.json` |
 | Uploaded images | `public/media/` |
 | Page | `src/pages/index.astro` |
-| Hero 3D scene | `src/scripts/grove.ts` (loader: `src/components/MushroomScene.astro`) |
+| Hero 3D scene | `src/scripts/grove.ts`, mushrooms in `src/scripts/fungi.ts` (loader: `src/components/MushroomScene.astro`) |
 | Styles and colour tokens | `src/styles/global.css` |
 | Deploy + daily rebuild | `.github/workflows/deploy.yml` |
 
 ## Design notes
 
-- **Hero:** a real-time 3D night grove, written with [three.js](https://threejs.org) in `src/scripts/grove.ts`. It draws on the band's Monstercat-era covers:
-  - Giant Amanita-style mushrooms with sculpted, lumpy caps, raised warts, a hanging skirt and about 150 glowing gill plates each.
-  - Clusters of bioluminescent mushrooms that ripple with light.
+- **Hero:** a real-time 3D night grove, written with [three.js](https://threejs.org) in `src/scripts/grove.ts` (mushroom builders in `src/scripts/fungi.ts`). It draws on the band's Monstercat-era covers and the IM30 cover:
+  - A giant Amanita-style mushroom with a sculpted, lumpy cap, raised warts, a hanging skirt and about 150 glowing gill plates.
+  - A towering cluster of IM30 trumpet mushrooms: glossy hot-pink wavy rims over fluted, cyan-streaked funnels. Light runs up the flutes, spores stream off the rims and drips of light fall to the ground.
+  - A forest of IM30 caps (parasol, wavy, liberty and funnel) with glowing gills and a thin-film rainbow sheen, fading into low violet haze.
+  - A glowing mycelium network under the moss. It spreads out from the giant when the page loads, pulses on the kick and lights up under the pointer.
   - A violet sky with a ringed planet, a crescent moon, shooting stars, a flying saucer with a tractor beam, and drifting spores.
-  - The glow pulses on a 145 BPM kick.
+  - The glow pulses on a 145 BPM kick. A final grade adds a vignette, film grain and slight lens fringing.
 - **Performance:**
   - The 3D code is about 150 KB gzipped and loads only after the page is interactive. Until then, and on devices without WebGL, the hero shows a gradient.
   - Rendering resolution adapts to how fast frames draw.
