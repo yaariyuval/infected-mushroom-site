@@ -695,43 +695,44 @@ function uExtreme(curve: THREE.CatmullRomCurve3, sign: 1 | -1) {
   return best;
 }
 
-// Left hand, from the cover: four heavy beak-like talons out of the dark to the left of the arch.
-// Thick rounded base, straight top edge, the underside sweeping up into a sharp point; last third navy.
-// Eyes on the thick base end (distances from the base, in finger thicknesses).
-function makeTalons(scale: number, seed: number, eyes: Eye[]) {
-  const rand = rng(seed);
-  const group = new THREE.Group();
-  group.position.copy(PORTAL);
-  const skin = skinMaterial();
-  const flex: Flexer[] = [];
-  const rows: { base: [number, number]; tip: [number, number]; H: number; eye: EyeSpec | null }[] = [
-    { base: [-3.4, 2.4], tip: [-1.4, 1.1], H: 0.52, eye: { d: 0.3, w: 0.62, asp: 3.2, lid: 0.55, tilt: 1.35 } },
-    { base: [-4.05, 1.15], tip: [-1.85, 0.05], H: 0.64, eye: { d: 0.55, w: 0.95, asp: 3.3, lid: 0.62, tilt: -0.2 } },
-    { base: [-3.95, -0.15], tip: [-1.6, -0.75], H: 0.62, eye: { d: 0.6, w: 1.0, asp: 2.2, lid: 0, tilt: -0.05 } },
-    { base: [-3.75, -1.4], tip: [-1.6, -1.7], H: 0.56, eye: null },
-  ];
-  rows.forEach((row, i) => {
-    const H = row.H * scale, D = 2 * H;
-    const [bx, by] = row.base.map((v) => v * scale);
-    const [tx, ty] = row.tip.map((v) => v * scale);
-    const z = 0.7 + (i % 2) * 0.1;
-    const pts = [0, 0.33, 0.66, 1].map((k) => new THREE.Vector3(lerp(bx, tx, k), lerp(by, ty, k) + 0.08 * Math.sin(Math.PI * k) * scale, z + 0.12 * Math.sin(Math.PI * k) - (k === 0 ? 0.25 : 0)));
-    const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4);
-    const profile = (t: number) => {
-      const base = t < 0.1 ? Math.sqrt(t / 0.1) : 1;
-      return Math.max(0.015, 1.02 - 0.98 * Math.pow(smooth(0.3, 1, t), 0.95)) * base;
-    };
-    const mesh = makeFingerMesh(curve, { H, W: H * 1.1, n: 2.8, profile, topFlat: 0.7, claw: [0.55, 0.63] }, skin);
-    const g = new THREE.Group();
-    g.add(mesh);
-    if (row.eye) g.add(projectEye(mesh, curve, uFrom(curve, 0, row.eye.d, D), D, row.eye, eyes, rand));
-    group.add(g);
-    flex.push({ g, phase: rand() * 6, amp: 0.03 });
+// Left hand: the four talons cut from the IM30 cover art (traced by hand, eyes and claws as painted),
+// reaching in from the left with their claw tips just over the ring's left edge, always facing the camera.
+// The claws flex slowly (tips move most) and the hand swells slightly on the beat.
+function makePaintedTalons(src: string) {
+  const tex = new THREE.TextureLoader().load(src);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  const HGT = 5.3, WID = HGT * (720 / 1217);
+  const geo = new THREE.PlaneGeometry(WID, HGT, 24, 32);
+  const uniforms = { map: { value: tex }, uT: { value: 0 }, uKick: { value: 0 } };
+  const mat = new THREE.ShaderMaterial({
+    uniforms,
+    vertexShader: `
+      uniform float uT, uKick; varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        vec3 p = position;
+        float tip = uv.x * uv.x;                     // claw tips are on the right
+        float talon = floor(uv.y * 4.);              // four talons stacked top to bottom
+        p.y -= tip * (.07 * (.5 + .5 * sin(uT * .8 + talon * 1.7)));
+        p.x += tip * .04 * sin(uT * .6 + talon * 2.3);
+        p *= 1. + .012 * uKick;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.);
+      }`,
+    fragmentShader: `
+      uniform sampler2D map; uniform float uKick; varying vec2 vUv;
+      void main() {
+        vec4 c = texture2D(map, vUv);
+        if (c.a < .02) discard;
+        gl_FragColor = vec4(min(c.rgb * 1.02, vec3(.9)) * (1. + .05 * uKick), c.a);
+      }`,
+    transparent: true, depthWrite: false, depthTest: false,
   });
-  function update(t: number) {
-    flex.forEach((f) => { f.g.rotation.z = -f.amp * (0.5 + 0.5 * Math.sin(t * 0.7 + f.phase)); });
-  }
-  return { group, update };
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.renderOrder = 5;
+  const group = new THREE.Group();
+  group.add(mesh);
+  return { group, mesh, uniforms, WID, HGT };
 }
 
 // Right hand: the painted fist cut straight out of the IM30 cover art (finger shapes, gaps and eyes exactly
@@ -1189,10 +1190,10 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   rig.add(roots.group);
 
   const eyes: Eye[] = [];
-  const left = makeTalons(1.0, 3, eyes);
+  const talons = makePaintedTalons(`${import.meta.env.BASE_URL.replace(/\/$/, '')}/media/im30-talons.webp`);
+  scene.add(talons.group);
   const fist = makePaintedFist(`${import.meta.env.BASE_URL.replace(/\/$/, '')}/media/im30-fist.webp`);
   scene.add(fist.group);
-  rig.add(left.group);
 
   const figs = [makeFigure(), makeFigure()];
   // out in front of where the portal faces, trudging away from it
@@ -1284,7 +1285,13 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
       }
     });
     roots.update(t);
-    left.update(t);
+    // painted talons: claw tips just over the ring's left edge, facing the camera
+    const tAnchor = rig.localToWorld(new THREE.Vector3(-RING_R + TUBE * 2.2, 0.3, 0.95).add(PORTAL));
+    talons.group.position.copy(tAnchor);
+    talons.group.quaternion.copy(camera.quaternion);
+    talons.mesh.position.set(-talons.WID / 2, 0, 0);
+    talons.uniforms.uT.value = t;
+    talons.uniforms.uKick.value = kick;
     // painted fist: fingertips resting over the ring's right edge, facing the camera
     rig.updateMatrixWorld();
     const anchor = rig.localToWorld(new THREE.Vector3(RING_R - TUBE * 1.1, -0.05, 0.95).add(PORTAL));

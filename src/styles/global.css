@@ -223,6 +223,16 @@ img { display: block; max-width: 100%; }
 }
 .wordmark .wm-fill { fill: #62f9fc; }
 
+/* short landscape screens (phones on their side): keep the logo in the lower-left corner, clear of the portal */
+@media (orientation: landscape) and (max-height: 560px) {
+  .hero .wrap { padding-block: 72px 14px; }
+  .wordmark { width: min(34vw, 62vh, 400px); }
+  .hero-meta { margin-top: 10px; gap: 8px 20px; }
+  .hero-meta .btn { padding: 0.55em 1.05em; font-size: 0.75rem; }
+  .next strong { font-size: 0.95rem; }
+  .site-header .wrap { padding-block: 12px; }
+}
+
 .hero-meta {
   display: flex;
   flex-wrap: wrap;
