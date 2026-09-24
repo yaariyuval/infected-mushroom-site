@@ -478,6 +478,10 @@ img { display: block; max-width: 100%; }
 }
 .discog a:hover h3 { text-decoration: underline; text-underline-offset: 3px; }
 .discog .eyebrow { font-size: 0.6875rem; }
+.disc-meta { display: flex; align-items: center; gap: 10px; }
+.disc-sp { display: inline-flex; align-items: center; gap: 5px; color: var(--dim); transition: color 0.2s; }
+.disc-sp svg { width: 13px; height: 13px; }
+.discog a:hover .disc-sp, .discog a:focus-visible .disc-sp { color: #1ed760; }
 
 /* ---------- About ---------- */
 

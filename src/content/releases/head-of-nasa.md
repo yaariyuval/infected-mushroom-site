@@ -5,6 +5,7 @@ label: "Monstercat"
 type: "Album"
 cover: "/media/covers/head-of-nasa.webp"
 listen: ""
+spotify: "https://open.spotify.com/album/5VVuvHfpofdhT6ExslEk2B"
 featured: false
 tracks: []
 ---

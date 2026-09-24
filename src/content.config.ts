@@ -30,6 +30,7 @@ const releases = defineCollection({
     type: z.string().optional().default('Album'),
     cover: z.string().optional().default(''),
     listen: z.string().optional().default(''),
+    spotify: z.string().optional().default(''),
     featured: z.boolean().optional().default(false),
     tracks: z.array(z.string()).optional().default([]),
   }),

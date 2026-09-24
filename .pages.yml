@@ -112,6 +112,10 @@ content:
         label: Listen link
         type: string
         description: Smart link or streaming URL.
+      - name: spotify
+        label: Spotify link
+        type: string
+        description: The album on Spotify (open.spotify.com/album/…). Shown on its discography card.
       - name: featured
         label: Feature on the homepage
         type: boolean

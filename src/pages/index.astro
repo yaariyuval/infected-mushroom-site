@@ -3,6 +3,7 @@ import { getCollection } from 'astro:content';
 import Base from '../layouts/Base.astro';
 import MushroomScene from '../components/MushroomScene.astro';
 import Arrow from '../components/Arrow.astro';
+import SpotifyIcon from '../components/SpotifyIcon.astro';
 import Emblem from '../components/Emblem.astro';
 import Wordmark from '../components/Wordmark.astro';
 import site from '../data/site.json';
@@ -88,7 +89,7 @@ const jsonLd = shows.map((s) => ({
         {site.shop_url && <a href={site.shop_url} rel="noopener">Merch<Arrow /></a>}
         {site.links.spotify && (
           <a class="icon-link" href={site.links.spotify} rel="noopener" aria-label="Infected Mushroom on Spotify">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M6.8 9.3c3.6-1.1 7.6-.8 10.6.9M7.4 12.4c3-.8 6.1-.5 8.6.8M8 15.3c2.3-.6 4.6-.4 6.5.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <SpotifyIcon />
           </a>
         )}
         {site.links.instagram && (
@@ -209,7 +210,7 @@ const jsonLd = shows.map((s) => ({
               )}
               <div class="listen">
                 {latest.data.listen && <a class="btn" href={latest.data.listen} rel="noopener">Listen now<Arrow /></a>}
-                {site.links.spotify && <a class="btn btn--ghost" href={site.links.spotify} rel="noopener">Spotify<Arrow /></a>}
+                {(latest.data.spotify || site.links.spotify) && <a class="btn btn--ghost" href={latest.data.spotify || site.links.spotify} rel="noopener">Spotify<Arrow /></a>}
               </div>
             </div>
           </div>
@@ -234,10 +235,14 @@ const jsonLd = shows.map((s) => ({
                   {r.data.cover && <img src={asset(r.data.cover)} alt="" loading="lazy" width="400" height="400" />}
                 </div>
                 <h3>{r.data.title}</h3>
-                <p class="eyebrow">{r.data.year}{r.data.label && ` · ${r.data.label}`}</p>
+                <p class="eyebrow disc-meta">
+                  {r.data.year}
+                  {r.data.spotify && <span class="disc-sp"><SpotifyIcon />Spotify</span>}
+                </p>
               </>
             );
-            return <li>{r.data.listen ? <a href={r.data.listen} rel="noopener">{inner}</a> : inner}</li>;
+            const href = r.data.spotify || r.data.listen;
+            return <li>{href ? <a href={href} rel="noopener" aria-label={r.data.spotify ? `${r.data.title} (${r.data.year}) on Spotify` : undefined}>{inner}</a> : inner}</li>;
           })}
         </ul>
       </div>
