@@ -440,32 +440,39 @@ interface Eye { mat: THREE.ShaderMaterial; phase: number; lid: number }
 
 const EYE_VERT = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`;
 const EYE_FRAG = `
-  uniform vec2 uLook; uniform float uBlink; varying vec2 vUv;
+  uniform vec2 uLook; uniform float uBlink; uniform float uAspect; varying vec2 vUv;
   void main() {
     vec2 p = (vUv - .5) * 2.;
-    // pointed almond: upper lid fuller than the lower
+    // pointed lemon shape; the corners taper into long points
     float x2 = min(p.x * p.x, 1.);
-    float up = .62 * pow(1. - x2, .9) * (1. - uBlink);
-    float lo = .46 * pow(1. - x2, 1.1);
+    float up = .7 * pow(1. - x2, 1.15) * (1. - uBlink);
+    float lo = .6 * pow(1. - x2, 1.3);
     float edge = min(up - p.y, p.y + lo);
-    float alpha = smoothstep(-.14, -.1, edge);
+    float alpha = smoothstep(-.12, -.08, edge);
     if (alpha <= 0.) discard;
-    vec2 ip = p - uLook * vec2(.34, .12) - vec2(0., .04);
-    float ir = length(ip * vec2(1., .95));
-    vec3 col = mix(vec3(.62, .7, 1.), vec3(.93, .95, 1.), smoothstep(0., .3, edge));   // sclera, blue in the shadow of the lids
-    vec3 irisC = mix(vec3(.05, .16, .75), vec3(.35, .62, 1.), smoothstep(.1, .5, ir));
-    col = mix(col, irisC, smoothstep(.54, .5, ir));
-    col = mix(col, vec3(.03, .05, .3), smoothstep(.03, 0., abs(ir - .53)));
-    col = mix(col, vec3(.45, .05, .12), smoothstep(.2, .17, ir));                       // maroon pupil
-    col = mix(col, vec3(1.15), smoothstep(.09, .06, length(ip - vec2(-.16, .16))));   // glint
-    col = mix(vec3(.16, .02, .12), col, smoothstep(0., .1, edge));                      // thick dark lid line
-    col = mix(col, vec3(.2, .35, 1.), smoothstep(.1, 0., edge) * step(p.y, 0.) * .6);  // blue lower lash line
-    gl_FragColor = vec4(col * .9, alpha);
+    // work in eye-space where 1 unit is the same size on both axes, so the iris stays round
+    vec2 q = vec2(p.x * uAspect, p.y);
+    vec2 look = uLook * vec2(.28 * uAspect, .1) * (1. - uBlink);
+    vec2 iq = q - look - vec2(0., .02);
+    float ir = length(iq);
+    vec3 col = vec3(.8, .82, .9);                                                          // white (kept under the bloom threshold)
+    col = mix(col, vec3(.45, .55, .9), smoothstep(.22, 0., edge));
+    col = mix(col, vec3(.22, .36, .92), smoothstep(.12, .3, uBlink) * .85);                // sleepy slits read blue, as on the cover                          // shadow under the lids
+    vec3 irisC = mix(vec3(.04, .16, .8), vec3(.25, .52, 1.), smoothstep(.12, .62, ir));   // big blue iris
+    irisC = mix(irisC, vec3(.06, .14, .6), smoothstep(.56, .71, ir));
+    col = mix(col, irisC, smoothstep(.74, .7, ir));
+    col = mix(col, vec3(.55, .07, .14), smoothstep(.2, .16, length(iq * vec2(.8, 1.1)))); // small maroon pupil
+    col = mix(col, vec3(1.), smoothstep(.1, .065, length(iq - vec2(-.26, .2))));        // glint
+    // blue liner running out into the pointed corners, dark rim along the lids
+    float corner = smoothstep(.55, .95, abs(p.x));
+    col = mix(col, vec3(.2, .35, 1.), corner * smoothstep(.25, 0., edge));
+    col = mix(vec3(.18, .02, .16), col, smoothstep(0., .08, edge + corner * .06));
+    gl_FragColor = vec4(col * .85, alpha);
   }`;
 
 function makeEyeDecal(width: number, height: number, eyes: Eye[], rand: () => number, lid = 0) {
   const mat = new THREE.ShaderMaterial({
-    uniforms: { uLook: { value: new THREE.Vector2() }, uBlink: { value: lid } },
+    uniforms: { uLook: { value: new THREE.Vector2() }, uBlink: { value: lid }, uAspect: { value: width / height } },
     vertexShader: EYE_VERT, fragmentShader: EYE_FRAG,
     transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2,
   });
@@ -524,7 +531,7 @@ function makeFinger(curve: THREE.CatmullRomCurve3, R: number, skin: THREE.Materi
 function eyeOnFinger(curve: THREE.CatmullRomCurve3, t: number, R: number, profile: (t: number) => number, toward: THREE.Vector3, size: number, eyes: Eye[], rand: () => number, lid = 0, tilt = 0) {
   const len = curve.getLength();
   const r0 = R * profile(t);
-  const w = r0 * 2.4 * size, h = Math.min(r0 * 1.2 * size, r0 * 1.7);
+  const w = r0 * 2.5 * size, h = Math.min(r0 * 1.08 * size, r0 * 1.5);
   const geo = new THREE.PlaneGeometry(w, h, 16, 8);
   const p = geo.attributes.position as THREE.BufferAttribute;
   const P = new THREE.Vector3(), T = new THREE.Vector3(), out = new THREE.Vector3(), bi = new THREE.Vector3();
@@ -545,7 +552,7 @@ function eyeOnFinger(curve: THREE.CatmullRomCurve3, t: number, R: number, profil
     p.setXYZ(i, P.x, P.y, P.z);
   }
   const mat = new THREE.ShaderMaterial({
-    uniforms: { uLook: { value: new THREE.Vector2() }, uBlink: { value: lid } },
+    uniforms: { uLook: { value: new THREE.Vector2() }, uBlink: { value: lid }, uAspect: { value: w / h } },
     vertexShader: EYE_VERT, fragmentShader: EYE_FRAG,
     transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, side: THREE.DoubleSide,
   });
@@ -569,7 +576,7 @@ function makeTalons(side: 1 | -1, scale: number, n: number, seed: number, eyes: 
   const group = new THREE.Group();
   group.position.copy(PORTAL);
   const skin = skinMaterial();
-  const toward = new THREE.Vector3(Math.sin(-TURN) - side * 0.1, 0.45, Math.cos(-TURN)).normalize();
+  const below = new THREE.Vector3(Math.sin(-TURN) - side * 0.15, -0.6, Math.cos(-TURN)).normalize();
   const flex: Flexer[] = [];
   const mid = (n - 1) / 2;
   let lowest: { curve: THREE.CatmullRomCurve3; g: THREE.Group; R: number } | null = null;
@@ -588,7 +595,7 @@ function makeTalons(side: 1 | -1, scale: number, n: number, seed: number, eyes: 
     };
     const g = new THREE.Group();
     g.add(makeFinger(curve, R, skin, profile, [0.56, 0.74]));
-    g.add(eyeOnFinger(curve, lerp(0.38, 0.44, rand()), R, profile, toward, eyeSize, eyes, rand, lid));
+    g.add(eyeOnFinger(curve, lerp(0.44, 0.5, rand()), R, profile, below, eyeSize, eyes, rand, lid, side * 0.15));
     group.add(g);
     if (i === n - 1) lowest = { curve, g, R };
     flex.push({ g, phase: rand() * 6, amp: 0.05 });
@@ -630,7 +637,7 @@ function makeFist(scale: number, seed: number, eyes: Eye[]) {
   const group = new THREE.Group();
   group.position.copy(PORTAL);
   const skin = skinMaterial();
-  const toward = new THREE.Vector3(Math.sin(-TURN), 0.5, Math.cos(-TURN)).normalize();
+  const toward = new THREE.Vector3(Math.sin(-TURN), 0.15, Math.cos(-TURN)).normalize();
   const flex: Flexer[] = [];
   const ys = [1.05, 0.38, -0.3, -0.98];
   ys.forEach((yy, i) => {
@@ -654,9 +661,12 @@ function makeFist(scale: number, seed: number, eyes: Eye[]) {
     const g = new THREE.Group();
     g.add(makeFinger(curve, R, skin, profile, [0.93, 1.0]));
     // a big eye near the fingertip on most fingers, smaller ones back on the knuckles
-    if (i !== 1) g.add(eyeOnFinger(curve, lerp(0.8, 0.86, rand()), R, profile, toward, lerp(1.15, 1.45, rand()), eyes, rand, rand() > 0.6 ? 0.25 : 0, (rand() - 0.5) * 0.5));
-    if (i === 1 || i === 2) g.add(eyeOnFinger(curve, lerp(0.5, 0.56, rand()), R, profile, toward, lerp(1.2, 1.4, rand()), eyes, rand, 0, (rand() - 0.5) * 0.3));
-    if (i === 0 || i === 3) g.add(eyeOnFinger(curve, lerp(0.3, 0.36, rand()), R, profile, toward, lerp(0.8, 1.0, rand()), eyes, rand, 0.3, (rand() - 0.5) * 0.4));
+    const big = [0.6, 0.5, 0.58, 0.62][i];
+    g.add(eyeOnFinger(curve, big, R, profile, toward, [1.2, 1.35, 1.25, 1.4][i], eyes, rand, 0, (rand() - 0.5) * 0.25));
+    // smaller, narrower eyes: toward the fingertip on some fingers, back toward the hand on others
+    if (i === 1) g.add(eyeOnFinger(curve, 0.72, R, profile, toward, 0.75, eyes, rand, 0.3, 0.2));
+    if (i === 0 || i === 3) g.add(eyeOnFinger(curve, 0.3, R, profile, toward, 0.95, eyes, rand, 0.2, (rand() - 0.5) * 0.3));
+    if (i === 2) g.add(eyeOnFinger(curve, 0.26, R, profile, toward, 0.8, eyes, rand, 0.35, 0));
     group.add(g);
     flex.push({ g, phase: rand() * 6, amp: 0.035 });
   });
