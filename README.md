@@ -60,7 +60,8 @@ npm run build    # outputs to dist/
 - **Hero:** a real-time 3D night grove, written with [three.js](https://threejs.org) in `src/scripts/grove.ts` (mushroom builders in `src/scripts/fungi.ts`). It draws on the band's Monstercat-era covers and the IM30 cover:
   - A giant Amanita-style mushroom with a sculpted, lumpy cap, raised warts, a hanging skirt and about 150 glowing gill plates.
   - A towering cluster of IM30 trumpet mushrooms: glossy hot-pink wavy rims over fluted, cyan-streaked funnels. Light runs up the flutes, spores stream off the rims and drips of light fall to the ground.
-  - Clumps of *Psilocybe cubensis* (golden caps opening from bells, dark gills, a spore-blackened ring) and *Psilocybe cyanescens* (wavy chestnut caps on long curving stems) at the giant's feet, in `src/scripts/psilocybe.ts`. Their blue bruises glow and pulse on the kick.
+  - Clumps of *Psilocybe cubensis* (golden caps opening from bells, dark gills, a spore-blackened ring) and *Psilocybe cyanescens* (wavy chestnut caps on long curving stems), and a scattered troop of *Psilocybe semilanceata* (liberty caps: pointed conical bells on long wavy stems) at the giant's feet, in `src/scripts/psilocybe.ts`. Their blue bruises glow and pulse on the kick.
+  - Add `?amanita=real` to the URL to swap the violet amanitas for lifelike fly agarics (scarlet caps, white warts in rings, cream gills, a scaly bulb), for comparison.
   - A forest of IM30 caps (parasol, wavy, liberty and funnel) with glowing gills and a thin-film rainbow sheen, fading into low violet haze.
   - A glowing mycelium network under the moss. It spreads out from the giant when the page loads, pulses on the kick and lights up under the pointer.
   - A violet sky with a ringed planet, a crescent moon, shooting stars, a flying saucer with a tractor beam, and drifting spores.

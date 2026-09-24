@@ -120,6 +120,9 @@ interface ShroomOpts {
   cap: THREE.ColorRepresentation; glow: THREE.Color;
   detail: number; // 0..1
   wart?: THREE.ColorRepresentation;
+  // true: a lifelike Amanita muscaria (scarlet cap, white cottony warts in rings, cream gills, white stem,
+  // a bulb ringed with veil scales); otherwise the grove's violet, glowing take on it
+  real?: boolean;
 }
 
 // Adds a per-vertex emissive term (translucent rim / underside) to a lit material.
@@ -160,6 +163,9 @@ function lathe(points: THREE.Vector2[], segs: number) {
   return g;
 }
 
+const REAL_CROWN = new THREE.Color(0.32, 0.004, 0.004), REAL_BODY = new THREE.Color(0.72, 0.018, 0.008), REAL_MARGIN = new THREE.Color(0.9, 0.2, 0.025);
+const REAL_GILL = new THREE.Color(0.97, 0.93, 0.84);
+
 function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
   const { h, r, bend, seed } = o;
   const rand = rng(seed * 9973 + 17);
@@ -178,7 +184,7 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
     let rad = lerp(0.19, 0.1, yy) * r;
     // bulbous foot; at the top the stem flares out into the cap, closing the hub the gills hang from
     const flare = smooth(h - 0.12 * r, h + 0.12, y);
-    rad *= 1 + 0.6 * smooth(0.22, 0, yy) + 0.5 * smooth(0.86, 1.02, yy) + 1.4 * flare * flare;
+    rad *= 1 + (o.real ? 0.95 : 0.6) * smooth(o.real ? 0.2 : 0.22, 0, yy) + 0.5 * smooth(0.86, 1.02, yy) + 1.4 * flare * flare;
     stemPts.push(new THREE.Vector2(rad, y));
   }
   const stemGeo = lathe(stemPts, Math.round(segs * 0.5));
@@ -198,14 +204,15 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
       glow[i] = Math.pow(yy, 4) * 0.15 + 1.6 * smooth(h - 0.25 * r, h - 0.05 * r, y);
       const streak = noise3(Math.cos(a) * 4, y * 0.6, Math.sin(a) * 4);
       const k = lerp(0.35, 1, smooth(-0.3, 0.6, yy)) * (0.8 + 0.3 * streak);
-      scol.set([0.95 * k, 0.78 * k, 0.9 * k], i * 3); // the gills above light the top of the stem
+      if (o.real) { const w = lerp(0.72, 1, smooth(-0.3, 0.5, yy)) * (0.9 + 0.12 * streak); scol.set([w, w * 0.97, w * 0.9], i * 3); }
+      else scol.set([0.95 * k, 0.78 * k, 0.9 * k], i * 3); // the gills above light the top of the stem
     }
     stemGeo.setAttribute('aGlow', new THREE.BufferAttribute(glow, 1));
     stemGeo.setAttribute('color', new THREE.BufferAttribute(scol, 3));
     stemGeo.computeVertexNormals();
   }
   const stemMat = withGlow(
-    new THREE.MeshStandardMaterial({ color: 0xcfc6ee, vertexColors: true, roughness: 0.8, metalness: 0, emissive: 0x0a0718 }),
+    new THREE.MeshStandardMaterial({ color: o.real ? 0xf4f0e8 : 0xcfc6ee, vertexColors: true, roughness: 0.8, metalness: 0, emissive: o.real ? 0x1a1612 : 0x0a0718 }),
     o.glow, pulse,
   );
   const stem = new THREE.Mesh(stemGeo, stemMat);
@@ -233,9 +240,14 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
       p.setXYZ(i, x, y, z);
       lowA[i] = low;
     }
+    if (o.real) {
+      const kc = new Float32Array(p.count * 3);
+      for (let i = 0; i < p.count; i++) { const l = smooth(0.6, 1, lowA[i]); kc.set([1, lerp(1, 0.9, l), lerp(0.97, 0.55, l)], i * 3); }
+      sk.setAttribute('color', new THREE.BufferAttribute(kc, 3));
+    }
     sk.setAttribute('aLow', new THREE.BufferAttribute(lowA, 1));
     sk.computeVertexNormals();
-    const skMat = new THREE.MeshStandardMaterial({ color: 0xd9d0f5, roughness: 0.85, side: THREE.DoubleSide, emissive: 0x1a1238 });
+    const skMat = new THREE.MeshStandardMaterial({ color: o.real ? 0xfaf6ee : 0xd9d0f5, vertexColors: !!o.real, roughness: 0.85, side: THREE.DoubleSide, emissive: o.real ? 0x1c1812 : 0x1a1238 });
     // the hanging edge drifts like light fabric in a slow draught
     skMat.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, { uT: fungiTime, uKick: fungiKick, uSeed: { value: seed }, uR: { value: r }, uBx: { value: bx } });
@@ -250,7 +262,7 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
             transformed.xz = c * (1. + lo * .014 * sin(ang * 3. - uT * .45 + uSeed)) + vec2(uBx, 0.);
           }`);
     };
-    skMat.customProgramCacheKey = () => 'skirt';
+    skMat.customProgramCacheKey = () => 'skirt' + (o.real ? '-real' : '');
     group.add(new THREE.Mesh(sk, skMat));
   }
 
@@ -313,8 +325,15 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
       // darker crown, lighter margin, mottling and radial fibrils
       const fibril = 0.5 + 0.5 * Math.sin(a * 90 + noise3(x * 3, y * 3, z * 3) * 6);
       const mottle = noise3(x / r * 7 + seed, y / r * 7, z / r * 7);
-      c.copy(deep).lerp(light, smooth(0.15 * r, 0.95 * r, rho) * 0.8 + 0.25 * mottle - 0.1);
-      c.multiplyScalar(0.85 + 0.25 * fibril * smooth(0.3 * r, r, rho));
+      if (o.real) {
+        // deep scarlet crown, orange-red body, paler orange at the margin, which is finely grooved
+        const u = rho / r;
+        c.copy(REAL_CROWN).lerp(REAL_BODY, smooth(0.05, 0.55, u + 0.15 * (mottle - 0.5))).lerp(REAL_MARGIN, smooth(0.78, 1, u) * 0.5);
+        c.multiplyScalar((0.9 + 0.15 * mottle) * (1 - 0.18 * smooth(0.82, 0.97, u) * Math.pow(0.5 + 0.5 * Math.sin(a * 140), 3)));
+      } else {
+        c.copy(deep).lerp(light, smooth(0.15 * r, 0.95 * r, rho) * 0.8 + 0.25 * mottle - 0.1);
+        c.multiplyScalar(0.85 + 0.25 * fibril * smooth(0.3 * r, r, rho));
+      }
       col.set([c.r, c.g, c.b], i * 3);
       const lump = (noise3(x / r * 2.4 + seed, y / r * 2.4, z / r * 2.4) - 0.5) * 0.09 * r * o.detail;
       const s = 1 + lump / r * 0.6;
@@ -333,13 +352,15 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
   }
   const capMat = withGlow(
     new THREE.MeshPhysicalMaterial({
-      color: 0xffffff, vertexColors: true, roughness: 0.42, metalness: 0,
-      clearcoat: 0.8, clearcoatRoughness: 0.3,
+      color: 0xffffff, vertexColors: true, roughness: o.real ? 0.3 : 0.42, metalness: 0,
+      clearcoat: o.real ? 1 : 0.8, clearcoatRoughness: o.real ? 0.15 : 0.3,
       side: THREE.DoubleSide,
+      // the real one keeps its scarlet under the grove's violet light
+      emissive: o.real ? 0x6a0300 : 0x000000,
     }),
-    MAGENTA.clone().multiplyScalar(0.25), pulse, true, o.detail > 0.5 ? MARGIN_WAVE(r, seed) : '',
+    o.real ? new THREE.Color(0.9, 0.06, 0.02).multiplyScalar(0.28) : MAGENTA.clone().multiplyScalar(0.25), pulse, true, o.detail > 0.5 ? MARGIN_WAVE(r, seed) : '',
     // between the gill plates the underside glows with them instead of showing dark
-    CYAN.clone().lerp(new THREE.Color(0.4, 0.15, 1), 0.3).multiplyScalar(0.55),
+    o.real ? REAL_GILL.clone().multiplyScalar(0.3) : CYAN.clone().lerp(new THREE.Color(0.4, 0.15, 1), 0.3).multiplyScalar(0.55),
   );
   capGroup.add(new THREE.Mesh(capGeo, capMat));
 
@@ -349,9 +370,11 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
     const n = capGeo.attributes.normal as THREE.BufferAttribute;
     const candidates: number[] = [];
     for (let i = 0; i < p.count; i++) if (p.getY(i) > rimY + 0.25 * r && n.getY(i) > 0.15) candidates.push(i);
-    const count = Math.round(lerp(14, 70, o.detail));
-    const wartGeo = new THREE.IcosahedronGeometry(1, 2);
-    const wartMat = new THREE.MeshStandardMaterial({ color: o.wart ?? 0xf4e2f2, roughness: 0.9, emissive: o.wart ?? 0xff8fe0, emissiveIntensity: o.wart ? 0.5 : 0.35 });
+    const count = Math.round(lerp(14, o.real ? 150 : 70, o.detail));
+    const wartGeo = new THREE.IcosahedronGeometry(1, o.real ? 1 : 2);
+    const wartMat = o.real
+      ? new THREE.MeshStandardMaterial({ color: 0xf6f1e6, roughness: 1, emissive: 0xfff2dc, emissiveIntensity: 0.28, flatShading: true })
+      : new THREE.MeshStandardMaterial({ color: o.wart ?? 0xf4e2f2, roughness: 0.9, emissive: o.wart ?? 0xff8fe0, emissiveIntensity: o.wart ? 0.5 : 0.35 });
     wartMat.onBeforeCompile = (sh) => {
       sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n#ifdef USE_INSTANCING_COLOR\ntotalEmissiveRadiance *= vColor * vColor;\n#endif');
     };
@@ -361,13 +384,29 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
     group.userData.warts = warts;
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
     const pos = new THREE.Vector3(), nor = new THREE.Vector3(), scl = new THREE.Vector3();
+    // real: laid out in loose concentric rings, big and crowded on the crown, small and sparse toward the margin
+    const nearest = (rho: number, ang: number) => {
+      let best = candidates[0], bd = Infinity;
+      const tx = Math.cos(ang) * rho, tz = Math.sin(ang) * rho;
+      for (const i of candidates) { const d = (p.getX(i) - tx) ** 2 + (p.getZ(i) - tz) ** 2; if (d < bd) { bd = d; best = i; } }
+      return best;
+    };
     for (let j = 0; j < count; j++) {
-      const i = candidates[Math.floor(rand() * candidates.length)];
+      let i: number, s: number;
+      if (o.real) {
+        const f = Math.pow((j + 0.5) / count, 0.75);             // ring position, crown to margin
+        const rho = r * (0.04 + 0.8 * f) + (rand() - 0.5) * 0.05 * r;
+        i = nearest(rho, j * 2.39996 + rand() * 0.4);            // golden-angle spacing around the rings
+        s = r * lerp(0.1, 0.035, f) * lerp(0.75, 1.2, rand());
+      } else {
+        i = candidates[Math.floor(rand() * candidates.length)];
+        s = r * lerp(0.025, 0.075, Math.pow(rand(), 1.6));
+      }
       pos.fromBufferAttribute(p, i);
       nor.fromBufferAttribute(n, i).normalize();
-      const s = r * lerp(0.025, 0.075, Math.pow(rand(), 1.6));
       q.setFromUnitVectors(up, nor);
-      scl.set(s, s * 0.45, s * lerp(0.8, 1.2, rand()));
+      if (o.real) scl.set(s, s * lerp(0.25, 0.45, rand()), s * lerp(0.8, 1.15, rand()));
+      else scl.set(s, s * 0.45, s * lerp(0.8, 1.2, rand()));
       m.compose(pos.addScaledVector(nor, s * 0.12), q, scl);
       warts.setMatrixAt(j, m);
     }
@@ -396,8 +435,8 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
         const tilt = -0.06 * x;
         posArr.push(x, yTop + tilt, z, x, yTop - depth + tilt, z);
         // bright cyan near the stem fading to violet at the margin; the free edge glows most
-        const c = CYAN.clone().lerp(new THREE.Color(0.4, 0.15, 1), smooth(0.3, 1, rho / r));
-        const k0 = lerp(0.3, 0.08, smooth(0, 0.35, t)), k1 = lerp(0.95, 0.45, rho / r);
+        const c = o.real ? REAL_GILL.clone() : CYAN.clone().lerp(new THREE.Color(0.4, 0.15, 1), smooth(0.3, 1, rho / r));
+        const k0 = o.real ? lerp(0.35, 0.2, t) : lerp(0.3, 0.08, smooth(0, 0.35, t)), k1 = o.real ? lerp(0.62, 0.45, rho / r) : lerp(0.95, 0.45, rho / r);
         colArr.push(c.r * k0, c.g * k0, c.b * k0, c.r * k1, c.g * k1, c.b * k1);
         const tt = (rho - inner) / (outer - inner);
         tArr.push(tt, tt); edgeArr.push(0, 1); plateArr.push(pr, pr); angArr.push(a, a);
@@ -428,10 +467,10 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
             // and a slow beam of light turning around the underside
             float sweep = pow(.5 + .5 * cos(vAng - uT * .45), 10.);
             float gate = min(diffuse.r, 1.2);
-            diffuseColor.rgb += (vec3(.45, 1.15, 1.6) * comet * (.35 + .65 * vEdge) * 1.3 + diffuseColor.rgb * sweep * .7) * gate;
+            diffuseColor.rgb += (${o.real ? 'vec3(1., .95, .8) * comet * (.35 + .65 * vEdge) * .8 + diffuseColor.rgb * sweep * .35' : 'vec3(.45, 1.15, 1.6) * comet * (.35 + .65 * vEdge) * 1.3 + diffuseColor.rgb * sweep * .7'}) * gate;
           }`);
     };
-    gm.customProgramCacheKey = () => 'gill-plates' + (o.detail > 0.5 ? MARGIN_WAVE(r, seed) : '');
+    gm.customProgramCacheKey = () => 'gill-plates' + (o.real ? '-real' : '') + (o.detail > 0.5 ? MARGIN_WAVE(r, seed) : '');
     const gills = new THREE.Mesh(gg, gm);
     gills.userData.pulseMat = gm;
     capGroup.add(gills);
@@ -450,7 +489,8 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
       for (let i = 0; i < hp.count; i++) {
         const x = hp.getX(i), z = hp.getZ(i), rho = Math.hypot(x, z);
         const k = lerp(0.55, 0.3, smooth(stemTopR, inner, rho));
-        hc.set([CYAN.r * k, CYAN.g * k, CYAN.b * k], i * 3);
+        const hcol = o.real ? REAL_GILL : CYAN;
+        hc.set([hcol.r * k, hcol.g * k, hcol.b * k], i * 3);
         hp.setY(i, hp.getY(i) + wave(Math.atan2(z, x), rho) - 0.06 * x);
       }
       hubGeo.setAttribute('color', new THREE.BufferAttribute(hc, 3));
@@ -458,6 +498,26 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
     const hub = new THREE.Mesh(hubGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
     capGroup.add(hub);
     group.userData.hub = hub.material;
+  }
+
+  /* real: the bulb at the foot, ringed with scaly remnants of the universal veil */
+  if (o.real && o.detail > 0.3) {
+    const rings = 3, per = 26;
+    const scales = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1),
+      new THREE.MeshStandardMaterial({ color: 0xefe8da, roughness: 1, flatShading: true, emissive: 0x1a1610 }), rings * per);
+    const mm = new THREE.Matrix4(), qq = new THREE.Quaternion(), e = new THREE.Euler();
+    for (let k = 0; k < rings; k++) for (let j = 0; j < per; j++) {
+      const yy = lerp(0.05, 0.16, k / (rings - 1)) * h;
+      const t = yy / h;
+      const rad = lerp(0.19, 0.1, t) * r * (1 + 0.95 * smooth(0.2, 0, t)) * 1.02;
+      const a = (j / per) * Math.PI * 2 + k * 0.4 + rand() * 0.15;
+      e.set(0, -a, -0.9 + rand() * 0.3);
+      qq.setFromEuler(e);
+      const sc = r * lerp(0.035, 0.025, k / rings);
+      mm.compose(new THREE.Vector3(Math.cos(a) * rad + bend * t * t * h, yy, Math.sin(a) * rad), qq, new THREE.Vector3(sc * 0.5, sc * 1.1, sc));
+      scales.setMatrixAt(k * per + j, mm);
+    }
+    group.add(scales);
   }
 
   /* a slow fall of glowing spores from the gills */
@@ -1243,8 +1303,10 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     { x: 14, y: -0.4, z: -20, s: 1.4, h: 2.6, r: 2.1, bend: -0.3, seed: 7, cap: 0x4d1a70, glow: MAGENTA.clone().multiplyScalar(0.3), detail: 0.12 },
   ];
   const calm = { value: 1 }; // the amanitas' glow breathes slowly instead of following the kick
+  // ?amanita=real swaps the grove's violet amanitas for lifelike scarlet fly agarics, for comparison
+  const realAmanita = debug.real ?? new URLSearchParams(location.search).get('amanita') === 'real';
   const amanitas: Placed<THREE.Group>[] = amanitaDefs.map((d) => {
-    const m = makeMushroom(d, calm);
+    const m = makeMushroom({ ...d, real: realAmanita }, calm);
     m.position.set(d.x, groundH(d.x, d.z) + d.y, d.z);
     m.scale.setScalar(d.s);
     m.rotation.y = d.seed * 1.7;
@@ -1350,11 +1412,13 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   trumpetLight.position.set(TX + 0.3, 3.2, TZ + 1.2);
   scene.add(trumpetLight);
 
-  /* Psilocybe clumps under the giant: cubensis to the left of its stem, cyanescens to the right.
+  /* Psilocybe under the giant: a cubensis clump left of its stem, cyanescens to the right, a troop of liberty caps.
      On portrait screens that ground is behind the title, so they move up close to the lens instead. */
   const psiloDefs: { sp: Species; seed: number; n: number; s: number; ps: number; land: [number, number]; port: [number, number]; ry: number }[] = [
     { sp: 'cubensis', seed: 21, n: 6, s: 0.42, ps: 0.48, land: [-0.55, 3.5], port: [-0.75, 10.3], ry: 0.6 },
     { sp: 'cyanescens', seed: 5, n: 8, s: 0.3, ps: 0.36, land: [0.75, 2.9], port: [0.8, 9.4], ry: -0.4 },
+    // liberty caps don't clump: a loose troop scattered through the moss
+    { sp: 'semilanceata', seed: 33, n: 9, s: 0.26, ps: 0.14, land: [1.5, 1.3], port: [0.15, 11.6], ry: 0.3 },
   ];
   const psilos = psiloDefs.map((d) => {
     const c = makePsilocybeCluster(d.sp, d.seed, d.n, 0.9);

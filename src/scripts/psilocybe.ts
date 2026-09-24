@@ -4,12 +4,15 @@
 //   pale edges; a thick, fibrous white stem with a membranous ring blackened by spores
 // - cyanescens ("wavy caps"): a flat chestnut cap with a paler hygrophanous band and a translucent,
 //   striate, strongly undulating margin; long, thin, curving white stems, growing in clusters
-// Both bruise blue; here the bruises glow cyan and pulse on the kick.
+// - semilanceata ("liberty cap"): a small, acutely conical-to-bell cap with a sharp papilla, slimy and
+//   glossy, buff where it has dried and chestnut-olive where still moist, the margin translucent and
+//   striate; a long, thin, wavy cream stem; crowded purple-brown gills; scattered in troops, not clumps
+// All bruise blue; here the bruises glow cyan and pulse on the kick.
 import * as THREE from 'three';
 import { lerp, smooth, rng, noise3 } from './grove-util';
 import { BPM, NOISE_GLSL, fungiTime, fungiKick } from './fungi';
 
-export type Species = 'cubensis' | 'cyanescens';
+export type Species = 'cubensis' | 'cyanescens' | 'semilanceata';
 
 export interface PsilocybeOpts {
   seed: number;
@@ -33,6 +36,11 @@ function capTop(sp: Species, age: number, u: number) {
     const old = 0.16 * (1 - u * u) + 0.08 * Math.exp(-u * u * 16) + 0.14 * smooth(0.55, 1, u) * u;
     return age < 0.5 ? lerp(young, mature, age * 2) : lerp(mature, old, age * 2 - 1);
   }
+  if (sp === 'semilanceata') {
+    // taller than wide: a cone softening to a bell, a sharp nipple on top, the margin tucked in
+    const h = lerp(1.4, 1.05, age);
+    return h * Math.pow(Math.max(0, 1 - Math.pow(u, 1.5)), 0.68) + 0.2 * Math.exp(-u * u * 110) - 0.12 * smooth(0.85, 1, u);
+  }
   // cyanescens: nearly flat, a low umbo, margin lifting with age
   const young = 0.4 * Math.pow(Math.max(0, 1 - u * u), 0.7) - 0.12 * u * u;
   const old = 0.14 * (1 - u * u) + 0.05 * Math.exp(-u * u * 20) + 0.1 * smooth(0.5, 1, u);
@@ -42,15 +50,15 @@ function capTop(sp: Species, age: number, u: number) {
 export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
   const { seed, age, detail } = o;
   const rand = rng(seed * 7919 + 3);
-  const cub = sp === 'cubensis';
-  const R = cub ? lerp(0.72, 1, smooth(0, 0.6, age)) : 1;  // young bells are narrower
+  const cub = sp === 'cubensis', semi = sp === 'semilanceata';
+  const R = cub ? lerp(0.72, 1, smooth(0, 0.6, age)) : semi ? lerp(0.62, 0.8, age) : 1;  // young bells are narrower
   const H = o.height;
   const bend = o.bend;
   const lit = { value: 1 };
   const g = new THREE.Group() as Psilocybe;
 
   /* ------------------------------------------------------------- stem */
-  const stemTop = cub ? 0.15 : 0.075, stemBase = cub ? 0.19 : 0.1;
+  const stemTop = cub ? 0.15 : semi ? 0.06 : 0.075, stemBase = cub ? 0.19 : semi ? 0.075 : 0.1;
   const rows = Math.round(lerp(12, 36, detail));
   const sPts: THREE.Vector2[] = [new THREE.Vector2(0.001, -0.08)];
   for (let i = 0; i <= rows; i++) {
@@ -63,7 +71,7 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
     const p = sGeo.attributes.position as THREE.BufferAttribute;
     const hh = new Float32Array(p.count);
     // cyanescens stems wander; cubensis stems are straighter and stout
-    const wob = cub ? 0.04 : 0.18;
+    const wob = cub ? 0.04 : semi ? 0.22 : 0.18;
     for (let i = 0; i < p.count; i++) {
       const y = p.getY(i), t = THREE.MathUtils.clamp(y / H, 0, 1);
       const lump = 1 + 0.05 * (noise3(p.getX(i) * 6 + seed, y * 2, p.getZ(i) * 6) - 0.5);
@@ -74,7 +82,7 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
     sGeo.setAttribute('aT', new THREE.BufferAttribute(hh, 1));
     sGeo.computeVertexNormals();
   }
-  const stemMat = new THREE.MeshStandardMaterial({ color: cub ? 0xf2ead8 : 0xeee8e2, roughness: 0.75, envMapIntensity: 0.3 });
+  const stemMat = new THREE.MeshStandardMaterial({ color: cub ? 0xf2ead8 : semi ? 0xf0e4c8 : 0xeee8e2, roughness: 0.75, envMapIntensity: 0.3 });
   stemMat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, { uT: fungiTime, uKick: fungiKick, uLit: lit, uSeed: { value: seed }, uCub: { value: cub ? 1 : 0 } });
     sh.vertexShader = sh.vertexShader
@@ -103,7 +111,8 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
   g.add(new THREE.Mesh(sGeo, stemMat));
 
   /* ------------------------------------------------ cubensis: the ring */
-  const tipX = bend + (cub ? 0.04 : 0.18) * Math.sin(5 + seed), tipZ = (cub ? 0.04 : 0.18) * 0.6 * Math.sin(4 + seed * 2);
+  const wobT = cub ? 0.04 : semi ? 0.22 : 0.18;
+  const tipX = bend + wobT * Math.sin(5 + seed), tipZ = wobT * 0.6 * Math.sin(4 + seed * 2);
   if (cub && age > 0.25) {
     const ry = H * 0.84, ra = lerp(stemBase, stemTop, Math.pow(0.84, 0.7));
     const ring = new THREE.LatheGeometry([
@@ -136,7 +145,7 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
   const N = Math.round(lerp(18, 48, detail));
   const top = (u: number) => capTop(sp, age, u) * R;
   const stemR = stemTop * 1.05;
-  const thick = (u: number) => (cub ? 0.2 : 0.12) * R * (1 - 0.8 * u) + 0.015;
+  const thick = (u: number) => (cub ? 0.2 : semi ? 0.09 : 0.12) * R * (1 - 0.8 * u) + 0.015;
   // profile: underside from the stem out to the margin, round the margin, then the top back to the apex
   const pts: THREE.Vector2[] = [];
   const kind: number[] = []; // 1 = underside
@@ -152,7 +161,7 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
   const segs = Math.round(lerp(40, 128, detail));
   const cGeo = new THREE.LatheGeometry(pts, segs);
   const nWaves = cub ? 6 : 5 + Math.floor(rand() * 3);
-  const wavAmp = (cub ? 0.035 : lerp(0.1, 0.22, age)) * R;
+  const wavAmp = (cub ? 0.035 : semi ? 0.02 : lerp(0.1, 0.22, age)) * R;
   const pn = (a: number, f: number, sd: number) => noise3(Math.cos(a) * f + sd * 7.3, Math.sin(a) * f, sd * 3.1) * 2 - 1;
   const wave = (a: number, u: number) => wavAmp * smooth(0.35, 1, u) * (0.75 * Math.sin(a * nWaves + seed) + 0.6 * pn(a, 2, seed));
   {
@@ -164,7 +173,7 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
       let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
       const a = Math.atan2(z, x), u = uu[row];
       // lobed, undulating margin; cyanescens also scallops in and out
-      const lobe = 1 + (cub ? 0.01 : 0.05) * smooth(0.6, 1, u) * Math.sin(a * nWaves * 2 + seed * 3);
+      const lobe = 1 + (cub || semi ? 0.01 : 0.05) * smooth(0.6, 1, u) * Math.sin(a * nWaves * 2 + seed * 3);
       const lump = 1 + 0.03 * (noise3(x * 3 + seed, y * 3, z * 3) - 0.5) * detail;
       x *= lobe * lump; z *= lobe * lump;
       y += wave(a, u);
@@ -176,24 +185,34 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
     cGeo.computeVertexNormals();
   }
   const capMat = new THREE.MeshPhysicalMaterial({
-    color: 0xffffff, roughness: cub ? 0.6 : 0.45, clearcoat: cub ? 0.2 : 0.45, clearcoatRoughness: 0.45,
+    color: 0xffffff, roughness: cub ? 0.6 : semi ? 0.35 : 0.45, clearcoat: cub ? 0.2 : semi ? 0.8 : 0.45, clearcoatRoughness: semi ? 0.25 : 0.45,
     side: THREE.DoubleSide, envMapIntensity: 0.2,
   });
   capMat.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, { uT: fungiTime, uKick: fungiKick, uLit: lit, uSeed: { value: seed }, uCub: { value: cub ? 1 : 0 }, uAge: { value: age } });
+    Object.assign(sh.uniforms, { uT: fungiTime, uKick: fungiKick, uLit: lit, uSeed: { value: seed }, uCub: { value: cub ? 1 : 0 }, uSemi: { value: semi ? 1 : 0 }, uAge: { value: age } });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float aU, aUnder; varying float vU, vUnder, vAng;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvU = aU; vUnder = aUnder; vAng = uv.x;');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-        uniform float uT, uKick, uLit, uSeed, uCub, uAge; varying float vU, vUnder, vAng;
+        uniform float uT, uKick, uLit, uSeed, uCub, uSemi, uAge; varying float vU, vUnder, vAng;
         ${NOISE_GLSL}
         float aaStripe(float ph, float sharp, float avg) { return mix(pow(.5 + .5 * sin(ph), sharp), avg, smoothstep(.5, 2., fwidth(ph))); }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         float A = vAng * 6.2831853;
         vec3 cap;
         float bruise = 0.;
-        if (uCub > .5) {
+        if (uSemi > .5) {
+          // dried to buff on top, still moist and chestnut-olive toward the margin, a darker nipple
+          cap = mix(vec3(.82, .64, .3), vec3(.42, .3, .1), smoothstep(.4, .88, vU) * mix(.9, .6, uAge));
+          cap = mix(cap, vec3(.36, .22, .08), exp(-vU * vU * 80.) * .75);
+          // translucent striations where the moist margin shows the gills through
+          cap *= 1. - .25 * aaStripe(A * 88., 3., .31) * smoothstep(.55, .95, vU);
+          cap *= .93 + .14 * n2(vec2(A * 5., vU * 8.) + uSeed);
+          // a flush of pink at the margin, and the faint blue-green of bruising
+          cap = mix(cap, vec3(.85, .35, .45), smoothstep(.85, 1., vU) * .2);
+          bruise = smoothstep(.72, .86, n2(vec2(A * 9., vU * 4.) + uSeed * 5.)) * smoothstep(.9, 1., vU) * .6;
+        } else if (uCub > .5) {
           // golden-caramel crown, cream margin; young caps are darker all over
           vec3 crown = mix(vec3(.5, .12, .06), vec3(.62, .2, .05), uAge);
           vec3 mid = vec3(.92, .5, .16), margin = vec3(.98, .8, .68);
@@ -217,7 +236,7 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
         }
         cap = mix(cap, vec3(.1, .28, .7), bruise * .75);
         // underside: dark purple-brown gills with pale edges, radiating from the stem
-        float gp = A * (uCub > .5 ? 64. : 52.);
+        float gp = A * (uCub > .5 ? 64. : uSemi > .5 ? 44. : 52.);
         float gill = aaStripe(gp, 5., .25);
         vec3 under = mix(vec3(.08, .045, .07), vec3(.5, .42, .45), gill * mix(.3, .8, uCub));
         diffuseColor.rgb = mix(cap, under, step(.5, vUnder));`)
@@ -229,7 +248,7 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
           float b = uT * ${BEAT};
           // the margin is thin and backlit: warm gold on cubensis, a cool amber on cyanescens
           // ...drifting slowly between gold and hot pink
-          vec3 rimC = mix(uCub > .5 ? vec3(1., .5, .1) : vec3(.95, .38, .2), vec3(1., .12, .62), .5 + .5 * sin(uT * .35 + uSeed + A));
+          vec3 rimC = mix(uCub > .5 ? vec3(1., .5, .1) : uSemi > .5 ? vec3(1., .6, .25) : vec3(.95, .38, .2), vec3(1., .12, .62), .5 + .5 * sin(uT * .35 + uSeed + A));
           // the cap keeps its own colour under the grove's violet light, from the first frame
           vec3 base = cap * (1. - isUnder) * .34;
           vec3 e = rimC * fres * smoothstep(.4, 1., vU) * .85 * (1. - isUnder);
@@ -251,7 +270,7 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
   /* gill plates, for the ones seen up close */
   let gillMat: THREE.MeshBasicMaterial | undefined;
   if (detail >= 0.55) {
-    const plates = Math.round(lerp(50, cub ? 120 : 90, detail));
+    const plates = Math.round(lerp(50, cub ? 120 : semi ? 70 : 90, detail));
     const steps = 8;
     const posArr: number[] = [], colArr: number[] = [], idx: number[] = [];
     const inner = stemR * 1.3, outer = 0.97 * R;
@@ -266,7 +285,7 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
         const t = s / steps;
         const rho = lerp(start, outer, t), u = rho / R;
         const yTop = top(u) - thick(u) + 0.005 + wave(a, u);
-        const depth = (cub ? 0.12 : 0.08) * R * Math.pow(Math.sin(Math.PI * lerp(0.1, 1, t)), 0.7) * smooth(0, 0.15, t) * smooth(1, 0.8, t);
+        const depth = (cub ? 0.12 : semi ? 0.06 : 0.08) * R * Math.pow(Math.sin(Math.PI * lerp(0.1, 1, t)), 0.7) * smooth(0, 0.15, t) * smooth(1, 0.8, t);
         posArr.push(ca * rho, yTop, sa * rho, ca * rho, yTop - depth, sa * rho);
         c.copy(edge).multiplyScalar(lerp(1, 0.6, u));
         colArr.push(root.r, root.g, root.b, c.r, c.g, c.b);
@@ -286,11 +305,26 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
 }
 
 // A clump growing from one spot, stems splaying outward: a few mature caps, some young bells, a button or two.
+// Liberty caps don't clump: they come up scattered through the grass in a loose troop.
 export function makePsilocybeCluster(sp: Species, seed: number, count: number, detail: number) {
   const rand = rng(seed);
   const group = new THREE.Group();
   const members: Psilocybe[] = [];
   const cub = sp === 'cubensis';
+  if (sp === 'semilanceata') {
+    for (let i = 0; i < count; i++) {
+      const age = lerp(0.1, 0.9, rand());
+      const a = (i / count) * Math.PI * 2 * 1.618 + rand();
+      const spread = i === 0 ? 0 : lerp(0.9, 3.2, Math.sqrt(rand()));
+      const m = makePsilocybe(sp, { seed: seed * 17 + i, age, height: lerp(5, 8.5, rand()) * lerp(0.7, 1, age), bend: lerp(-0.3, 0.5, rand()), detail: i < 4 ? detail : detail * 0.7 });
+      m.position.set(Math.cos(a) * spread, 0, Math.sin(a) * spread);
+      m.rotation.y = rand() * 6.28;
+      m.scale.setScalar(lerp(0.8, 1.15, rand()));
+      group.add(m);
+      members.push(m);
+    }
+    return { group, members };
+  }
   for (let i = 0; i < count; i++) {
     const age = i === 0 ? 0.55 : Math.pow(rand(), 0.8) * (cub ? 0.9 : 1);
     const a = (i / count) * Math.PI * 2 + rand() * 0.8;
