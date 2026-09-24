@@ -96,7 +96,7 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
         {
           float bruiseE = smoothstep(.55, .75, n2(vec2(vAng * 9., vT * 5.) + uSeed)) * smoothstep(.75, .05, vT);
           float pulse = pow(fract(vT * 1.2 - uT * ${BEAT} * .25 + uSeed * .1), 8.);
-          totalEmissiveRadiance += (vec3(.05, .55, 1.) * bruiseE * (.35 + .5 * uKick + .6 * pulse) + vec3(.06, .05, .09)) * uLit;
+          totalEmissiveRadiance += (vec3(.05, .65, 1.1) * bruiseE * (.45 + .6 * uKick + .7 * pulse) + mix(vec3(.08, .04, .12), vec3(.03, .07, .12), vT)) * uLit;
         }`);
   };
   stemMat.customProgramCacheKey = () => 'psilo-stem';
@@ -195,8 +195,8 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
         float bruise = 0.;
         if (uCub > .5) {
           // golden-caramel crown, cream margin; young caps are darker all over
-          vec3 crown = mix(vec3(.42, .16, .02), vec3(.55, .25, .04), uAge);
-          vec3 mid = vec3(.85, .52, .14), margin = vec3(.95, .86, .62);
+          vec3 crown = mix(vec3(.5, .12, .06), vec3(.62, .2, .05), uAge);
+          vec3 mid = vec3(.92, .5, .16), margin = vec3(.98, .8, .68);
           cap = mix(crown, mid, smoothstep(.05, .6, vU));
           cap = mix(cap, margin, smoothstep(.6, .97, vU) * mix(.4, .85, uAge));
           cap *= .9 + .2 * n2(vec2(A * 3., vU * 6.) + uSeed);
@@ -207,10 +207,10 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
           bruise = smoothstep(.62, .8, n2(vec2(A * 9., vU * 4.) + uSeed * 5.)) * smoothstep(.86, .99, vU) * .8;
         } else {
           // chestnut centre, a pale drying band, a translucent, finely striate margin stained blue
-          cap = mix(vec3(.3, .12, .04), vec3(.58, .29, .1), smoothstep(0., .35, vU));
+          cap = mix(vec3(.34, .07, .15), vec3(.64, .26, .14), smoothstep(0., .35, vU));
           float band = smoothstep(.35, .5, vU) * smoothstep(.75, .6, vU) * (.6 + .4 * n2(vec2(A * 4., vU * 3.) + uSeed));
-          cap = mix(cap, vec3(.86, .7, .45), band * .8);
-          cap = mix(cap, vec3(.5, .27, .12), smoothstep(.72, .95, vU));
+          cap = mix(cap, vec3(.96, .62, .55), band * .8);
+          cap = mix(cap, vec3(.55, .24, .2), smoothstep(.72, .95, vU));
           cap *= 1. - .22 * aaStripe(A * 110., 3., .31) * smoothstep(.62, .95, vU);
           bruise = smoothstep(.5, .75, n2(vec2(A * 5., vU * 3.) + uSeed * 5.)) * smoothstep(.65, 1., vU);
           cap *= .92 + .16 * n2(vec2(A * 7., vU * 9.) + uSeed);
@@ -228,14 +228,18 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
           float isUnder = step(.5, vUnder);
           float b = uT * ${BEAT};
           // the margin is thin and backlit: warm gold on cubensis, a cool amber on cyanescens
-          vec3 rimC = uCub > .5 ? vec3(1., .55, .15) : vec3(.9, .45, .2);
+          // ...drifting slowly between gold and hot pink
+          vec3 rimC = mix(uCub > .5 ? vec3(1., .55, .15) : vec3(.95, .42, .25), vec3(1., .2, .6), .5 + .5 * sin(uT * .35 + uSeed + A));
           // the cap keeps its own colour under the grove's violet light
-          vec3 e = cap * (1. - isUnder) * .3 + rimC * fres * smoothstep(.55, 1., vU) * .45 * (1. - isUnder);
+          vec3 e = cap * (1. - isUnder) * .3 + rimC * fres * smoothstep(.5, 1., vU) * .55 * (1. - isUnder);
+          // an oil-slick sheen where the cap turns away
+          vec3 film = .5 + .5 * cos(6.2831853 * (fres * 1.5 + vU * .5 + uT * .03 + uSeed * .1 + vec3(0., .33, .67)));
+          e += film * pow(fres, 1.4) * .22 * (1. - isUnder);
           // blue bruises glow and throb on the kick
-          e += vec3(.05, .6, 1.) * bruise * (.4 + .7 * uKick) * (1. - isUnder);
+          e += vec3(.05, .7, 1.2) * bruise * (.55 + .8 * uKick) * (1. - isUnder);
           // gills: a violet-cyan glow between the plates, a ripple running out to the margin every other beat
           float run = pow(fract(vU * 1.1 - b * .5 + uSeed * .13), 6.);
-          e += mix(vec3(.25, .1, .7), vec3(.1, .7, 1.), vU) * isUnder * (.12 + .5 * run + .15 * uKick) * smoothstep(1., .3, vU);
+          e += mix(vec3(.35, .1, .8), vec3(.1, .75, 1.), vU) * isUnder * (.18 + .6 * run + .2 * uKick) * smoothstep(1., .3, vU);
           totalEmissiveRadiance += e * uLit;
         }`);
   };
