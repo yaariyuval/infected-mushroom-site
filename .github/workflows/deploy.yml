@@ -3,7 +3,7 @@ name: Deploy site
 on:
   push:
     # main is the live site; the other branches are built as previews under /preview-<branch>/
-    branches: [main, hero-im30, hero-im30-fable]
+    branches: [main, hero-im30, hero-im30-fable, hero-grove]
   # Rebuild every morning so past shows drop off the list.
   schedule:
     - cron: '0 4 * * *'
@@ -41,7 +41,7 @@ jobs:
           SITE_URL: ${{ steps.pages.outputs.origin }}
           PUBLIC_NOINDEX: '1'
         run: |
-          for b in hero-im30 hero-im30-fable; do
+          for b in hero-im30 hero-im30-fable hero-grove; do
             if git fetch --depth 1 origin "$b" 2>/dev/null; then
               git worktree add "/tmp/$b" FETCH_HEAD
               (cd "/tmp/$b" && npm ci && BASE_PATH="${{ steps.pages.outputs.base_path }}/preview-$b" npm run build)
