@@ -512,7 +512,7 @@ function makeFinger(curve: THREE.CatmullRomCurve3, R: number, skin: THREE.Materi
   const nrm = geo.attributes.normal as THREE.BufferAttribute;
   for (let i = 0; i <= TS; i++) {
     const t = i / TS;
-    const wrinkle = 1 - 0.35 * Math.max(Math.exp(-Math.pow((t - 0.58) / 0.012, 2)), Math.exp(-Math.pow((t - 0.66) / 0.012, 2)), Math.exp(-Math.pow((t - 0.33) / 0.012, 2)));
+    const wrinkle = 1;
     for (let j = 0; j <= RS; j++) {
       const idx = i * (RS + 1) + j;
       const ny = nrm.getY(idx);
@@ -539,7 +539,8 @@ function eyeOnFinger(curve: THREE.CatmullRomCurve3, t: number, R: number, profil
   const T0 = curve.getTangentAt(t);
   const dir = T0.x > 0 ? -1 : 1;
   for (let i = 0; i < p.count; i++) {
-    const u = p.getX(i), v = p.getY(i);
+    const u0 = p.getX(i), v0 = p.getY(i);
+    const u = u0 * Math.cos(tilt) - v0 * Math.sin(tilt), v = u0 * Math.sin(tilt) + v0 * Math.cos(tilt);
     const ct = THREE.MathUtils.clamp(t + (dir * u) / len, 0, 1);
     curve.getPointAt(ct, P);
     curve.getTangentAt(ct, T);
@@ -547,7 +548,7 @@ function eyeOnFinger(curve: THREE.CatmullRomCurve3, t: number, R: number, profil
     bi.crossVectors(T, out).normalize();
     if (bi.y < 0) bi.negate();
     const r = R * profile(ct) * 1.03;
-    const th = v / r + tilt * (u / w);
+    const th = v / r;
     P.addScaledVector(out, Math.cos(th) * r).addScaledVector(bi, Math.sin(th) * r);
     p.setXYZ(i, P.x, P.y, P.z);
   }
@@ -569,107 +570,139 @@ function skinMaterial() {
 
 type Flexer = { g: THREE.Group; phase: number; amp: number };
 
-// Left: talons only (no palm, no arm), reaching out of the dark around the arch's outer edge,
-// beak-like and tapering into long dark claws, with half-closed slit eyes near the base.
-function makeTalons(side: 1 | -1, scale: number, n: number, seed: number, eyes: Eye[], lid: number, eyeSize: number) {
+// Left hand: four heavy beak-like talons reaching out of the dark to the left of the arch. Each is a thick
+// rounded base tapering almost straight to a sharp point, the last third fading to dark navy. The eyes sit
+// on the thick base end facing the viewer: a slit turned on its end (top), a sleepy blue slit (second),
+// a big wide-open eye (third), none on the bottom one. Fingers flex slightly.
+function makeTalons(scale: number, seed: number, eyes: Eye[]) {
   const rand = rng(seed);
   const group = new THREE.Group();
   group.position.copy(PORTAL);
   const skin = skinMaterial();
-  const below = new THREE.Vector3(Math.sin(-TURN) - side * 0.15, -0.6, Math.cos(-TURN)).normalize();
+  const toward = new THREE.Vector3(Math.sin(-TURN), 0.1, Math.cos(-TURN)).normalize();
   const flex: Flexer[] = [];
-  const mid = (n - 1) / 2;
-  let lowest: { curve: THREE.CatmullRomCurve3; g: THREE.Group; R: number } | null = null;
-  for (let i = 0; i < n; i++) {
-    const y = (mid - i) * 0.62 * scale + 0.1 + (rand() - 0.5) * 0.1;
-    const R = 0.34 * scale * (i === n - 1 ? 0.85 : 1);
-    const reach = lerp(0.85, 1.15, rand()) * (i === 0 || i === n - 1 ? 0.85 : 1);
+  const rows = [
+    { y: 1.35, reach: 1.0, dip: 0.55, eye: { t: 0.1, size: 0.9, lid: 0.45, tilt: 1.25 } },
+    { y: 0.5, reach: 1.1, dip: 0.3, eye: { t: 0.16, size: 1.1, lid: 0.62, tilt: -0.08 } },
+    { y: -0.35, reach: 1.0, dip: 0.2, eye: { t: 0.15, size: 1.25, lid: 0, tilt: 0 } },
+    { y: -1.2, reach: 0.9, dip: 0.15, eye: null },
+  ];
+  rows.forEach((row, i) => {
+    const y = row.y * scale;
+    const R = 0.4 * scale * (i === 3 ? 0.9 : 1);
+    const L = 2.3 * scale * row.reach;
+    const x0 = -RING_R - 1.05 * scale;           // base out beside the arch
+    const z = 0.75 + (i % 2) * 0.12;
     const pts = [
-      [-1.0, 0.25, -0.9], [-1.1, 0.2, 0.0], [-0.7, 0.05, 0.72],
-      [0.0, -0.15, 0.92], [0.65 * reach, -0.45, 0.78], [1.05 * reach, -0.72, 0.55],
-    ].map(([u, yy, z]) => new THREE.Vector3(side * (RING_R - u * scale), y + yy * scale, z * (0.9 + 0.1 * scale)));
-    const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+      [0, 0.12, -0.25], [0.3, 0.1, 0.05], [0.65, 0.02, 0.12], [1.0, -row.dip * 0.5, 0.08], [1.25, -row.dip, 0],
+    ].map(([u, yy, dz]) => new THREE.Vector3(x0 + u * L / 1.25, y + yy * L / 1.25, z + dz));
+    const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4);
     const profile = (t: number) => {
-      const beak = 1 - 0.45 * smooth(0.35, 1, t);
-      return t > 0.8 ? beak * Math.pow(1 - smooth(0.8, 1, t), 0.8) : beak;
+      const base = t < 0.08 ? Math.sqrt(t / 0.08) : 1;                        // rounded, bulbous base
+      const beak = 1.08 - 0.08 * t - 0.95 * Math.pow(smooth(0.2, 1, t), 1.15); // near-straight taper to a point
+      return Math.max(0.02, beak) * base;
     };
     const g = new THREE.Group();
-    g.add(makeFinger(curve, R, skin, profile, [0.56, 0.74]));
-    g.add(eyeOnFinger(curve, lerp(0.44, 0.5, rand()), R, profile, below, eyeSize, eyes, rand, lid, side * 0.15));
+    g.add(makeFinger(curve, R, skin, profile, [0.46, 0.76]));
+    if (row.eye) g.add(eyeOnFinger(curve, row.eye.t, R, profile, toward, row.eye.size, eyes, rand, row.eye.lid, row.eye.tilt));
     group.add(g);
-    if (i === n - 1) lowest = { curve, g, R };
-    flex.push({ g, phase: rand() * 6, amp: 0.05 });
-  }
-  // goo dripping from the lowest talon
-  const drips: THREE.Group[] = [];
-  if (side > 0 && lowest) {
-    for (const t of [0.3, 0.37, 0.45]) {
-      const len = lerp(0.25, 0.6, rand());
-      const d = new THREE.Group();
-      const prof = [[0.001, 0], [0.05, -0.02], [0.03, -0.25], [0.028, -len * 0.7], [0.06, -len * 0.92], [0.075, -len - 0.04], [0.05, -len - 0.12], [0.001, -len - 0.14]]
-        .map(([x, y]) => new THREE.Vector2(x * scale * 1.4, y));
-      const geo = new THREE.LatheGeometry([...prof].reverse(), 16);
-      const cnt = geo.attributes.position.count;
-      const col = new Float32Array(cnt * 3);
-      for (let i = 0; i < cnt; i++) col.set([0.85, 0.05, 0.4], i * 3);
-      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-      geo.setAttribute('aGlow', new THREE.BufferAttribute(new Float32Array(cnt).fill(1), 1));
-      d.add(new THREE.Mesh(geo, skin));
-      const p = lowest.curve.getPointAt(t);
-      d.position.copy(p).add(new THREE.Vector3(0, -lowest.R * 0.85, 0));
-      d.userData.phase = rand() * 6;
-      drips.push(d);
-      lowest.g.add(d);
-    }
-  }
+    flex.push({ g, phase: rand() * 6, amp: 0.04 });
+  });
   function update(t: number) {
-    flex.forEach((f) => { f.g.rotation.z = side * f.amp * (0.5 + 0.5 * Math.sin(t * 0.7 + f.phase)); f.g.rotation.y = 0.03 * Math.sin(t * 0.5 + f.phase); });
-    drips.forEach((d) => { d.scale.y = 1 + 0.25 * Math.sin(t * 0.9 + d.userData.phase); });
+    flex.forEach((f) => { f.g.rotation.z = -f.amp * (0.5 + 0.5 * Math.sin(t * 0.7 + f.phase)); f.g.rotation.y = 0.025 * Math.sin(t * 0.5 + f.phase); });
   }
   return { group, update };
 }
 
+// Wrap an eye onto an ellipsoid (the back of the hand), aimed along `toward`.
+function eyeOnBlob(center: THREE.Vector3, radii: THREE.Vector3, anchor: THREE.Vector2, toward: THREE.Vector3, w: number, h: number, tilt: number, eyes: Eye[], rand: () => number, lid = 0) {
+  const geo = new THREE.PlaneGeometry(w, h, 16, 8);
+  const p = geo.attributes.position as THREE.BufferAttribute;
+  const right = new THREE.Vector3(0, 1, 0).cross(toward).normalize().negate();
+  const up = new THREE.Vector3().crossVectors(toward, right).normalize();
+  const o = new THREE.Vector3(), d = toward.clone().negate(), q = new THREE.Vector3(), e = new THREE.Vector3();
+  const c = Math.cos(tilt), s = Math.sin(tilt);
+  for (let i = 0; i < p.count; i++) {
+    const u0 = p.getX(i), v0 = p.getY(i);
+    const u = u0 * c - v0 * s + anchor.x, v = u0 * s + v0 * c + anchor.y;
+    o.copy(center).addScaledVector(right, u).addScaledVector(up, v).addScaledVector(toward, 20);
+    // ray-ellipsoid intersection in unit-sphere space
+    q.copy(o).sub(center).divide(radii);
+    e.copy(d).divide(radii);
+    const a = e.dot(e), b = 2 * q.dot(e), cc = q.dot(q) - 1;
+    const disc = Math.max(0, b * b - 4 * a * cc);
+    const tHit = (-b - Math.sqrt(disc)) / (2 * a);
+    o.addScaledVector(d, tHit - 0.01);
+    p.setXYZ(i, o.x, o.y, o.z);
+  }
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uLook: { value: new THREE.Vector2() }, uBlink: { value: lid }, uAspect: { value: w / h } },
+    vertexShader: EYE_VERT, fragmentShader: EYE_FRAG,
+    transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, side: THREE.DoubleSide,
+  });
+  eyes.push({ mat, phase: rand() * 10, lid });
+  return new THREE.Mesh(geo, mat);
+}
 
-// The big hand on the right of the cover: fat, overlapping fingers that bend sharply down at the knuckle
-// into rounded tips, with eyes of different sizes near the fingertips and back on the knuckles.
+// Right hand, as on the cover: a clenched fist of four thick fingers stacked with dark gaps between them,
+// each running out of the broad back of the hand and folding down at a rounded fingertip; the lowest
+// (the thumb) crosses diagonally. Eyes: a long sleepy one on the top finger; a small tilted slit near the tip
+// and a big open eye on the second; the biggest open eye near the tip of the third; a tilted slit on the
+// thumb; and two more on the back of the hand at the right edge.
 function makeFist(scale: number, seed: number, eyes: Eye[]) {
   const rand = rng(seed);
   const group = new THREE.Group();
   group.position.copy(PORTAL);
   const skin = skinMaterial();
-  const toward = new THREE.Vector3(Math.sin(-TURN), 0.15, Math.cos(-TURN)).normalize();
+  const toward = new THREE.Vector3(Math.sin(-TURN), 0.12, Math.cos(-TURN)).normalize();
   const flex: Flexer[] = [];
-  const ys = [1.05, 0.38, -0.3, -0.98];
-  ys.forEach((yy, i) => {
-    const y = yy * scale;
-    const R = 0.44 * scale * (i === 3 ? 0.88 : 1);
-    const bend = lerp(0.75, 1.0, rand());
-    const tipIn = lerp(0.2, 0.45, rand()) + (i === 0 ? -0.1 : 0);
-    const X = RING_R;
-    const z0 = 0.95 - i * 0.05;
+  const X = RING_R;
+
+  const rows = [
+    { y: 1.1, reach: 0.72, fold: 0.9, eyes: [{ t: 0.6, size: 1.3, lid: 0.4, tilt: -0.1 }, { t: 0.2, size: 1.1, lid: 0, tilt: 0 }] },
+    { y: 0.36, reach: 0.8, fold: 0.85, eyes: [{ t: 0.46, size: 1.05, lid: 0, tilt: 0 }, { t: 0.7, size: 0.7, lid: 0.45, tilt: 0.55 }] },
+    { y: -0.38, reach: 0.78, fold: 0.9, eyes: [{ t: 0.68, size: 1.2, lid: 0, tilt: 0.08 }, { t: 0.2, size: 1.0, lid: 0.35, tilt: 0 }] },
+  ];
+  rows.forEach((row, i) => {
+    const y = row.y * scale;
+    const R = 0.46 * scale;
+    const z0 = 0.82 - i * 0.04;
+    const reach = row.reach * scale;
     const pts = [
-      [X + 2.0, y + 0.2, 0.2], [X + 1.35, y + 0.15, z0 - 0.15], [X + 0.75, y + 0.1, z0],
-      [X + 0.2, y + 0.02, z0 + 0.08], [X - tipIn * 0.5, y - 0.3 * bend, z0 + 0.02], [X - tipIn * 0.75, y - 0.7 * bend, z0 - 0.12],
+      [X + 4.2 * scale, y + 0.5, 0.35], [X + 2.6 * scale, y + 0.3, z0 - 0.05], [X + 1.1 * scale, y + 0.1, z0 + 0.04],
+      [X - reach * 0.35, y - 0.06, z0 + 0.06], [X - reach * 0.65, y - 0.5 * row.fold, z0 - 0.02], [X - reach * 0.5, y - 0.85 * row.fold, z0 - 0.3],
     ].map(([x, yv, z]) => new THREE.Vector3(x, yv, z));
-    const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+    const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4);
     const profile = (t: number) => {
-      const knuckles = 0.1 * Math.exp(-Math.pow((t - 0.42) / 0.07, 2)) + 0.12 * Math.exp(-Math.pow((t - 0.66) / 0.06, 2));
       const tip = t > 0.9 ? Math.sqrt(Math.max(0, 1 - Math.pow((t - 0.9) / 0.1, 2))) : 1;
-      const base = t < 0.05 ? Math.sqrt(t / 0.05) : 1; // rounded, not an open tube end
-      return (1 - 0.18 * smooth(0.5, 1, t) + knuckles) * tip * base;
+      const base = t < 0.04 ? Math.sqrt(t / 0.04) : 1;
+      return (1 - 0.12 * t) * tip * base;
     };
     const g = new THREE.Group();
-    g.add(makeFinger(curve, R, skin, profile, [0.93, 1.0]));
-    // a big eye near the fingertip on most fingers, smaller ones back on the knuckles
-    // as on the cover: one eye per finger (staggered), two on the middle finger, and a couple of
-    // small ones back near the knuckles; small enough that they never overlap the next finger
-    const main = [0.46, 0.56, 0.36, 0.62][i];
-    g.add(eyeOnFinger(curve, main, R, profile, toward, i === 2 ? 0.85 : 0.75, eyes, rand, 0, (rand() - 0.5) * 0.2));
-    if (i === 2) g.add(eyeOnFinger(curve, 0.63, R, profile, toward, 0.5, eyes, rand, 0.2, 0.1));
-    if (i === 1 || i === 3) g.add(eyeOnFinger(curve, 0.11, R, profile, toward, 0.55, eyes, rand, 0.2, (rand() - 0.5) * 0.2));
+    g.add(makeFinger(curve, R, skin, profile, null));
+    row.eyes.forEach((e) => g.add(eyeOnFinger(curve, e.t, R, profile, toward, e.size, eyes, rand, e.lid, e.tilt)));
     group.add(g);
-    flex.push({ g, phase: rand() * 6, amp: 0.035 });
+    flex.push({ g, phase: rand() * 6, amp: 0.03 });
   });
+  // thumb: crosses the bottom of the fist diagonally, rising to the right, with a tilted slit eye
+  {
+    const R = 0.38 * scale;
+    const y = -1.2 * scale;
+    const pts = [
+      [X + 3.6 * scale, y + 0.9, 0.3], [X + 1.8 * scale, y + 0.35, 0.85], [X + 0.2, y - 0.1, 0.95], [X - 0.45 * scale, y - 0.32, 0.8], [X - 0.62 * scale, y - 0.5, 0.5],
+    ].map(([x, yv, z]) => new THREE.Vector3(x, yv, z));
+    const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4);
+    const profile = (t: number) => {
+      const tip = t > 0.88 ? Math.sqrt(Math.max(0, 1 - Math.pow((t - 0.88) / 0.12, 2))) : 1;
+      const base = t < 0.04 ? Math.sqrt(t / 0.04) : 1;
+      return (1 - 0.2 * t) * tip * base;
+    };
+    const g = new THREE.Group();
+    g.add(makeFinger(curve, R, skin, profile, null));
+    g.add(eyeOnFinger(curve, 0.58, R, profile, toward, 1.05, eyes, rand, 0.5, 0.35));
+    group.add(g);
+    flex.push({ g, phase: rand() * 6, amp: 0.02 });
+  }
   function update(t: number) {
     flex.forEach((f) => { f.g.rotation.z = f.amp * Math.sin(t * 0.6 + f.phase); f.g.position.x = 0.03 * Math.sin(t * 0.8 + f.phase); });
   }
@@ -1072,7 +1105,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   rig.add(roots.group);
 
   const eyes: Eye[] = [];
-  const left = makeTalons(-1, 1.15, 4, 3, eyes, 0.3, 1.45);
+  const left = makeTalons(1.0, 3, eyes);
   const right = makeFist(1.0, 8, eyes);
   right.group.position.y -= 0.4;
   rig.add(left.group, right.group);
