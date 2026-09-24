@@ -96,7 +96,7 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
         {
           float bruiseE = smoothstep(.55, .75, n2(vec2(vAng * 9., vT * 5.) + uSeed)) * smoothstep(.75, .05, vT);
           float pulse = pow(fract(vT * 1.2 - uT * ${BEAT} * .25 + uSeed * .1), 8.);
-          totalEmissiveRadiance += (vec3(.05, .65, 1.1) * bruiseE * (.45 + .6 * uKick + .7 * pulse) + mix(vec3(.08, .04, .12), vec3(.03, .07, .12), vT)) * uLit;
+          totalEmissiveRadiance += (vec3(.05, .65, 1.1) * bruiseE * (.45 + .6 * uKick + .7 * pulse) + mix(vec3(.08, .04, .12), vec3(.03, .07, .12), vT)) * max(uLit, .45);
         }`);
   };
   stemMat.customProgramCacheKey = () => 'psilo-stem';
@@ -230,8 +230,9 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
           // the margin is thin and backlit: warm gold on cubensis, a cool amber on cyanescens
           // ...drifting slowly between gold and hot pink
           vec3 rimC = mix(uCub > .5 ? vec3(1., .5, .1) : vec3(.95, .38, .2), vec3(1., .12, .62), .5 + .5 * sin(uT * .35 + uSeed + A));
-          // the cap keeps its own colour under the grove's violet light
-          vec3 e = cap * (1. - isUnder) * .3 + rimC * fres * smoothstep(.4, 1., vU) * .85 * (1. - isUnder);
+          // the cap keeps its own colour under the grove's violet light, from the first frame
+          vec3 base = cap * (1. - isUnder) * .34;
+          vec3 e = rimC * fres * smoothstep(.4, 1., vU) * .85 * (1. - isUnder);
           // an oil-slick sheen where the cap turns away
           vec3 film = .5 + .5 * cos(6.2831853 * (fres * 1.5 + vU * .5 + uT * .03 + uSeed * .1 + vec3(0., .33, .67)));
           film = film * film * vec3(1., .8, 1.2);   // saturated: colour, not a white wash
@@ -241,7 +242,7 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
           // gills: a violet-cyan glow between the plates, a ripple running out to the margin every other beat
           float run = pow(fract(vU * 1.1 - b * .5 + uSeed * .13), 6.);
           e += mix(vec3(.35, .1, .8), vec3(.1, .75, 1.), vU) * isUnder * (.18 + .6 * run + .2 * uKick) * smoothstep(1., .3, vU);
-          totalEmissiveRadiance += e * uLit;
+          totalEmissiveRadiance += base + e * max(uLit, .45);
         }`);
   };
   capMat.customProgramCacheKey = () => 'psilo-cap';

@@ -123,17 +123,22 @@ interface ShroomOpts {
 }
 
 // Adds a per-vertex emissive term (translucent rim / underside) to a lit material.
-function withGlow<T extends THREE.MeshStandardMaterial>(mat: T, color: THREE.Color, strength: { value: number }) {
+// With `sweep`, a band of brighter glow travels slowly around the mushroom.
+function withGlow<T extends THREE.MeshStandardMaterial>(mat: T, color: THREE.Color, strength: { value: number }, sweep = false) {
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uGlowC = { value: color };
     sh.uniforms.uGlowK = strength;
+    sh.uniforms.uT = fungiTime;
+    // the sweep is evaluated per vertex: an angle interpolated across the lathe's seam would draw a line
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aGlow;\nvarying float vGlow;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = aGlow;');
+      .replace('#include <common>', '#include <common>\nattribute float aGlow;\nuniform float uT;\nvarying float vGlow;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        vGlow = aGlow${sweep ? ' * (1. + 1.6 * pow(.5 + .5 * sin(atan(position.z, position.x) * 2. - uT * .9), 6.))' : ''};`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nuniform vec3 uGlowC;\nuniform float uGlowK;\nvarying float vGlow;')
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += uGlowC * vGlow * uGlowK;');
   };
+  mat.customProgramCacheKey = () => (sweep ? 'glow-sweep' : 'glow');
   return mat;
 }
 
@@ -158,10 +163,12 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
   stemPts.push(new THREE.Vector2(0.001, -0.35));
   for (let i = 0; i <= rows; i++) {
     const t = i / rows;
-    const y = lerp(-0.3, h + 0.05, t);
+    const y = lerp(-0.3, h + 0.12, t);
     const yy = THREE.MathUtils.clamp(y / h, 0, 1);
     let rad = lerp(0.19, 0.1, yy) * r;
-    rad *= 1 + 0.6 * smooth(0.22, 0, yy) + 0.5 * smooth(0.86, 1.02, yy);
+    // bulbous foot; at the top the stem flares out into the cap, closing the hub the gills hang from
+    const flare = smooth(h - 0.12 * r, h + 0.12, y);
+    rad *= 1 + 0.6 * smooth(0.22, 0, yy) + 0.5 * smooth(0.86, 1.02, yy) + 1.4 * flare * flare;
     stemPts.push(new THREE.Vector2(rad, y));
   }
   const stemGeo = lathe(stemPts, Math.round(segs * 0.5));
@@ -204,16 +211,35 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
     ];
     const sk = lathe([...skPts].reverse(), segs);
     const p = sk.attributes.position as THREE.BufferAttribute;
+    const lowA = new Float32Array(p.count);
+    const bx = bend * 0.64 * h;
     for (let i = 0; i < p.count; i++) {
       let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
       const a = Math.atan2(z, x);
       const low = smooth(ry, ry - 0.22 * r, y);
       y += low * r * (0.03 * (noise3(Math.cos(a) * 3 + seed, Math.sin(a) * 3, 2) - 0.5) * 2 + 0.012 * Math.sin(a * 9 + seed));
-      x += bend * 0.64 * h;
+      x += bx;
       p.setXYZ(i, x, y, z);
+      lowA[i] = low;
     }
+    sk.setAttribute('aLow', new THREE.BufferAttribute(lowA, 1));
     sk.computeVertexNormals();
     const skMat = new THREE.MeshStandardMaterial({ color: 0xd9d0f5, roughness: 0.85, side: THREE.DoubleSide, emissive: 0x1a1238 });
+    // the hanging edge ripples like fabric in a draught, and flares out on the kick
+    skMat.onBeforeCompile = (sh) => {
+      Object.assign(sh.uniforms, { uT: fungiTime, uKick: fungiKick, uSeed: { value: seed }, uR: { value: r }, uBx: { value: bx } });
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute float aLow;\nuniform float uT, uKick, uSeed, uR, uBx;')
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+          {
+            vec2 c = transformed.xz - vec2(uBx, 0.);
+            float ang = atan(c.y, c.x);
+            float lo = aLow * aLow;
+            transformed.y += lo * uR * (.035 * sin(ang * 5. + uT * 1.8 + uSeed) + .02 * sin(ang * 11. - uT * 2.7 + uSeed * 2.) - .03 * uKick);
+            transformed.xz = c * (1. + lo * (.06 * uKick + .025 * sin(ang * 3. - uT * 1.3))) + vec2(uBx, 0.);
+          }`);
+    };
+    skMat.customProgramCacheKey = () => 'skirt';
     group.add(new THREE.Mesh(sk, skMat));
   }
 
@@ -297,7 +323,7 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
       clearcoat: 0.8, clearcoatRoughness: 0.3,
       side: THREE.DoubleSide,
     }),
-    MAGENTA.clone().multiplyScalar(0.25), pulse,
+    MAGENTA.clone().multiplyScalar(0.25), pulse, true,
   );
   capGroup.add(new THREE.Mesh(capGeo, capMat));
 
@@ -310,7 +336,13 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
     const count = Math.round(lerp(14, 70, o.detail));
     const wartGeo = new THREE.IcosahedronGeometry(1, 2);
     const wartMat = new THREE.MeshStandardMaterial({ color: o.wart ?? 0xf4e2f2, roughness: 0.9, emissive: o.wart ?? 0xff8fe0, emissiveIntensity: o.wart ? 0.5 : 0.35 });
+    wartMat.onBeforeCompile = (sh) => {
+      sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n#ifdef USE_INSTANCING_COLOR\ntotalEmissiveRadiance *= vColor * vColor;\n#endif');
+    };
+    wartMat.customProgramCacheKey = () => 'wart';
     const warts = new THREE.InstancedMesh(wartGeo, wartMat, count);
+    for (let j = 0; j < count; j++) warts.setColorAt(j, new THREE.Color(1, 1, 1));
+    group.userData.warts = warts;
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
     const pos = new THREE.Vector3(), nor = new THREE.Vector3(), scl = new THREE.Vector3();
     for (let j = 0; j < count; j++) {
@@ -331,8 +363,10 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
     const plates = Math.round(lerp(60, 170, o.detail));
     const steps = 10;
     const posArr: number[] = [], colArr: number[] = [], idx: number[] = [];
-    const inner = stemTopR * 1.25, outer = under[0][0] * r - 0.01 * r;
+    const inner = stemTopR * 2.6, outer = under[0][0] * r - 0.01 * r;
+    const tArr: number[] = [], edgeArr: number[] = [], plateArr: number[] = [], angArr: number[] = [];
     for (let g = 0; g < plates; g++) {
+      const pr = rand();
       const a = (g / plates) * Math.PI * 2 + (rand() - 0.5) * 0.01;
       const start = g % 2 ? lerp(inner, outer, 0.45) : g % 4 === 2 ? lerp(inner, outer, 0.2) : inner;
       const ca = Math.cos(a), sa = Math.sin(a);
@@ -347,20 +381,102 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
         posArr.push(x, yTop + tilt, z, x, yTop - depth + tilt, z);
         // bright cyan near the stem fading to violet at the margin; the free edge glows most
         const c = CYAN.clone().lerp(new THREE.Color(0.4, 0.15, 1), smooth(0.3, 1, rho / r));
-        const k0 = 0.08, k1 = lerp(0.95, 0.45, rho / r);
+        const k0 = lerp(0.3, 0.08, smooth(0, 0.35, t)), k1 = lerp(0.95, 0.45, rho / r);
         colArr.push(c.r * k0, c.g * k0, c.b * k0, c.r * k1, c.g * k1, c.b * k1);
+        const tt = (rho - inner) / (outer - inner);
+        tArr.push(tt, tt); edgeArr.push(0, 1); plateArr.push(pr, pr); angArr.push(a, a);
         if (s < steps) { const v = base + s * 2; idx.push(v, v + 1, v + 2, v + 1, v + 3, v + 2); }
       }
     }
     const gg = new THREE.BufferGeometry();
     gg.setAttribute('position', new THREE.Float32BufferAttribute(posArr, 3));
     gg.setAttribute('color', new THREE.Float32BufferAttribute(colArr, 3));
+    gg.setAttribute('aT', new THREE.Float32BufferAttribute(tArr, 1));
+    gg.setAttribute('aEdge', new THREE.Float32BufferAttribute(edgeArr, 1));
+    gg.setAttribute('aPlate', new THREE.Float32BufferAttribute(plateArr, 1));
+    gg.setAttribute('aAng', new THREE.Float32BufferAttribute(angArr, 1));
     gg.setIndex(idx);
     const gm = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
+    gm.onBeforeCompile = (sh) => {
+      sh.uniforms.uT = fungiTime;
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute float aT, aEdge, aPlate, aAng;\nvarying float vT, vEdge, vPlate, vAng;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvT = aT; vEdge = aEdge; vPlate = aPlate; vAng = aAng;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform float uT;\nvarying float vT, vEdge, vPlate, vAng;')
+        .replace('#include <color_fragment>', `#include <color_fragment>
+          {
+            // comets of light running out along the plates, stem to margin, each plate on its own clock
+            float x = fract(vT * 1.1 - uT * (.22 + .3 * vPlate) + vPlate * 9.);
+            float comet = pow(x, 12.) * (1. - smoothstep(.97, 1., x)) * step(.6, fract(vPlate * 7.3));
+            // and a slow beam of light turning around the underside
+            float sweep = pow(.5 + .5 * cos(vAng - uT * .45), 10.);
+            float gate = min(diffuse.r, 1.2);
+            diffuseColor.rgb += (vec3(.45, 1.15, 1.6) * comet * (.35 + .65 * vEdge) * 1.3 + diffuseColor.rgb * sweep * .7) * gate;
+          }`);
+    };
+    gm.customProgramCacheKey = () => 'gill-plates';
     const gills = new THREE.Mesh(gg, gm);
     gills.userData.pulseMat = gm;
     capGroup.add(gills);
     group.userData.gills = gm;
+
+    // the hub between the stem and where the gills begin: a glowing collar, so there's no dark hole
+    const hubPts: THREE.Vector2[] = [];
+    for (let i = 0; i <= 8; i++) {
+      const rho = lerp(0.001, inner + 0.04 * r, i / 8);
+      hubPts.push(new THREE.Vector2(rho, underY(rho) + 0.004 * r - 0.03 * r * smooth(inner * 0.7, inner, rho)));
+    }
+    const hubGeo = new THREE.LatheGeometry(hubPts, Math.round(segs * 0.5));
+    {
+      const hp = hubGeo.attributes.position as THREE.BufferAttribute;
+      const hc = new Float32Array(hp.count * 3);
+      for (let i = 0; i < hp.count; i++) {
+        const x = hp.getX(i), z = hp.getZ(i), rho = Math.hypot(x, z);
+        const k = lerp(0.55, 0.3, smooth(stemTopR, inner, rho));
+        hc.set([CYAN.r * k, CYAN.g * k, CYAN.b * k], i * 3);
+        hp.setY(i, hp.getY(i) + wave(Math.atan2(z, x), rho) - 0.06 * x);
+      }
+      hubGeo.setAttribute('color', new THREE.BufferAttribute(hc, 3));
+    }
+    const hub = new THREE.Mesh(hubGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+    capGroup.add(hub);
+    group.userData.hub = hub.material;
+  }
+
+  /* a slow fall of glowing spores from the gills */
+  if (o.detail > 0.9) {
+    const N = 150;
+    const sd = new Float32Array(N);
+    for (let i = 0; i < N; i++) sd[i] = rand();
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
+    g.setAttribute('aSeed', new THREE.BufferAttribute(sd, 1));
+    const sm = new THREE.ShaderMaterial({
+      uniforms: { uT: fungiTime, uSize: { value: 30 }, uH: { value: h }, uR: { value: r }, uBx: { value: bend * h } },
+      vertexShader: `
+        attribute float aSeed; uniform float uT, uSize, uH, uR, uBx; varying float vA; varying float vHue;
+        void main() {
+          float k = fract(aSeed * 7.1 + uT * (.025 + .025 * fract(aSeed * 3.3)));
+          float a = aSeed * 6.2832 * 11. + k * 2.5;
+          float rad = uR * mix(.3, .95, fract(aSeed * 13.7)) * (1. + .25 * k);
+          vec3 p = vec3(uBx * (1. - k * .5) + cos(a) * rad, uH - .12 * uR - k * (uH + .1), sin(a) * rad);
+          p.x += sin(uT * .6 + aSeed * 30.) * .12;
+          vec4 mv = modelViewMatrix * vec4(p, 1.);
+          gl_Position = projectionMatrix * mv;
+          gl_PointSize = uSize * (.4 + .8 * fract(aSeed * 17.)) / -mv.z;
+          vA = smoothstep(0., .08, k) * smoothstep(1., .75, k) * (.5 + .5 * sin(uT * 3. + aSeed * 60.));
+          vHue = fract(aSeed * 5.);
+        }`,
+      fragmentShader: `varying float vA; varying float vHue;
+        void main(){ float d = length(gl_PointCoord - .5); float a = smoothstep(.5, 0., d);
+          gl_FragColor = vec4(mix(vec3(.3, 1.1, 1.5), vec3(.9, .4, 1.4), vHue) * a * a * vA * 1.4, 1.); }`,
+      blending: THREE.AdditiveBlending, transparent: true, depthWrite: false,
+    });
+    const pts = new THREE.Points(g, sm);
+    pts.frustumCulled = false;
+    group.add(pts);
+    group.userData.spores = sm;
   }
 
   group.userData.cap = capGroup;
@@ -1220,7 +1336,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   /* Psilocybe clumps under the giant: cubensis to the left of its stem, cyanescens to the right.
      On portrait screens that ground is behind the title, so they move up close to the lens instead. */
   const psiloDefs: { sp: Species; seed: number; n: number; s: number; ps: number; land: [number, number]; port: [number, number]; ry: number }[] = [
-    { sp: 'cubensis', seed: 21, n: 6, s: 0.42, ps: 0.6, land: [-0.55, 3.5], port: [-1.05, 9.9], ry: 0.6 },
+    { sp: 'cubensis', seed: 21, n: 6, s: 0.42, ps: 0.6, land: [-0.55, 3.5], port: [-0.8, 10.3], ry: 0.6 },
     { sp: 'cyanescens', seed: 5, n: 8, s: 0.3, ps: 0.36, land: [0.75, 2.9], port: [0.8, 9.4], ry: -0.4 },
   ];
   const psilos = psiloDefs.map((d) => {
@@ -1237,7 +1353,8 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
       sh.scale.setScalar(k * 3);
       c.group.position.set(x, groundH(x, z) - 0.02, z);
       sh.position.set(x, groundH(x, z) + 0.03, z);
-      c.members.forEach((m) => (m.userData.d = fromOrigin(x, z)));
+      // they're what a visitor sees first on a phone, so the infection reaches them early wherever they stand
+      c.members.forEach((m) => (m.userData.d = Math.min(fromOrigin(x, z), 6)));
     };
     place(false);
     return { ...c, place };
@@ -1275,10 +1392,10 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   const MOON_DIST = 200, MOON_R = MOON_DIST * Math.tan(THREE.MathUtils.degToRad(4));
   function placeMoon(portrait: boolean) {
     // landscape: the clear sky between the planet and the giant; portrait: above the giant
-    moonRel.set(portrait ? 0.07 : 0.15, portrait ? 0.36 : 0.3, -1).normalize();
+    moonRel.set(portrait ? 0.105 : 0.15, portrait ? 0.36 : 0.3, -1).normalize();
   }
   let shift = -3, dist = 13, portrait = false;
-  const planetRel = new THREE.Vector3(-0.14, 0.25, -1).normalize();
+  const planetRel = new THREE.Vector3(-0.13, 0.32, -1).normalize();
   function aimMoon(yaw: number) {
     MOON_DIR.copy(moonRel).applyAxisAngle(Y, -yaw);
     const pl = (sky.material as THREE.ShaderMaterial).uniforms.uPL.value as THREE.Vector3;
@@ -1326,6 +1443,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     [spores.material as THREE.ShaderMaterial, 55], [moss.material as THREE.ShaderMaterial, 30],
     [ufo.moteMat, 45], [bokeh.material as THREE.ShaderMaterial, 650],
     ...trumpets.flatMap((t) => t.m.userData.points.map((m) => [m, 34] as [THREE.ShaderMaterial, number])),
+    ...amanitas.filter((a) => a.m.userData.spores).map((a) => [a.m.userData.spores, 36] as [THREE.ShaderMaterial, number]),
   ];
   function resize() {
     const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -1357,6 +1475,18 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     over = Math.abs(ndc.y) <= 1 ? 1 : 0;
   };
   addEventListener('pointermove', onMove, { passive: true });
+
+  // warts light up one after another, a brief sparkle each
+  const tw = new THREE.Color();
+  function twinkle(m: THREE.Object3D, t: number, kick: number) {
+    const warts = m.userData.warts as THREE.InstancedMesh | undefined;
+    if (!warts) return;
+    for (let j = 0; j < warts.count; j++) {
+      const k = 0.75 + 2.4 * Math.pow(Math.max(0, Math.sin(t * 1.1 + j * 2.39 + m.userData.seed)), 24) + 0.25 * kick;
+      warts.setColorAt(j, tw.setScalar(k));
+    }
+    warts.instanceColor!.needsUpdate = true;
+  }
 
   const t0 = performance.now();
   const target = new THREE.Vector3();
@@ -1402,12 +1532,17 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     });
     amanitas.forEach(({ m, d }, i) => {
       const s = m.userData.seed as number;
-      m.rotation.z = 0.018 * Math.sin(t * 0.55 + s * 2.3);
-      m.rotation.x = 0.012 * Math.sin(t * 0.43 + s * 1.1);
+      m.rotation.z = 0.03 * Math.sin(t * 0.55 + s * 2.3) + 0.01 * Math.sin(t * 1.3 + s);
+      m.rotation.x = 0.02 * Math.sin(t * 0.43 + s * 1.1);
       const cap = m.userData.cap as THREE.Group;
-      const br = 1 + 0.02 * Math.sin(t * 0.9 + s * 2.3);
-      cap.scale.set(br, 1 / Math.sqrt(br), br);
-      (m.userData.gills as THREE.MeshBasicMaterial).color.setScalar((i === 0 ? pulse.value * 1.15 : 0.6 + 0.3 * kick) * litOf(d));
+      // the cap lags the stem a little, breathes, and dips on the kick
+      cap.rotation.x = 0.035 * Math.sin(t * 0.55 + s * 2.3 - 0.8);
+      const br = 1 + 0.025 * Math.sin(t * 0.9 + s * 2.3) + 0.015 * kick;
+      cap.scale.set(br, (1 - 0.03 * kick) / Math.sqrt(br), br);
+      twinkle(m, t, kick);
+      const gk = (i === 0 ? pulse.value * 1.15 : 0.6 + 0.3 * kick) * litOf(d);
+      (m.userData.gills as THREE.MeshBasicMaterial).color.setScalar(gk);
+      (m.userData.hub as THREE.MeshBasicMaterial).color.setScalar(gk);
     });
     psilos.forEach(({ members }) => members.forEach((m: Psilocybe, i) => {
       const s = m.userData.seed;
@@ -1424,7 +1559,10 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
       // they bounce on the kick, alternating
       const hop = s % 2 ? kick : Math.exp(-((((t * BPM) / 60 + 0.5) % 1) * 5));
       (m.userData.cap as THREE.Object3D).scale.set(1 + 0.05 * hop, 1 - 0.07 * hop, 1 + 0.05 * hop);
-      (m.userData.gills as THREE.MeshBasicMaterial).color.setScalar((0.85 + 0.5 * hop) * Math.min(1, litOf(d)));
+      const gk = (0.85 + 0.5 * hop) * Math.min(1, litOf(d));
+      (m.userData.gills as THREE.MeshBasicMaterial).color.setScalar(gk);
+      (m.userData.hub as THREE.MeshBasicMaterial).color.setScalar(gk);
+      twinkle(m, t, kick);
     });
     gillLight.intensity = (3.5 + 2.5 * kick) * Math.min(litOf(amanitas[0].d), 1.5);
     magentaLight.intensity = 2.5 * Math.min(litOf(amanitas[1].d), 1.5);
