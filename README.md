@@ -69,7 +69,7 @@ npm run build    # outputs to dist/
 - **Performance:**
   - The 3D code is about 150 KB gzipped and loads only after the page is interactive. Until then, and on devices without WebGL, the hero shows a gradient.
   - Rendering resolution adapts to how fast frames draw.
-  - The scene pauses when off-screen or in a background tab, and renders one still frame for visitors with *reduce motion* set.
+  - The scene pauses when off-screen or in a background tab, and for visitors with *reduce motion* set it keeps only the slow drift: half speed, no beat pulses, no intro flash and a still camera.
 - **Logo:** the hero wordmark (`src/components/Wordmark.astro`) and the header emblem and favicon (`src/components/Emblem.astro`) are vector traces of the band's own logo, used with their permission.
 - **Type:** Tektur is the display face. It's a blocky, chamfered variable font picked to match the wordmark, and city names widen on hover. Geologica is used for text and Martian Mono for dates and labels. All fonts are self-hosted.
 - **Colour:** indigo night, moonlight text, and bioluminescent cyan and magenta, taken from the IM30, IM25 and Head of NASA covers.

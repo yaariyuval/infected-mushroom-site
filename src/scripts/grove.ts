@@ -1573,19 +1573,23 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   const target = new THREE.Vector3();
   let first = true, litAt = 0;
   function frame(now: number) {
-    const t = debug.t ?? (opts.still ? 18 : (now - t0) / 1000 + 6);
-    const kick = opts.still ? 0.3 : Math.exp(-(((t * BPM) / 60) % 1) * 5);
-    mx += (tx - mx) * 0.03; my += (ty - my) * 0.03;
+    // reduced motion: everything drifts at half speed, nothing pulses on the beat, and the camera holds still
+    const calmOnly = opts.still;
+    const t = debug.t ?? ((now - t0) / 1000 * (calmOnly ? 0.5 : 1) + 6);
+    const beat = (off: number) => (calmOnly ? 0.3 : Math.exp(-((((t * BPM) / 60 + off) % 1) * 5)));
+    const kick = beat(0);
+    if (!calmOnly) { mx += (tx - mx) * 0.03; my += (ty - my) * 0.03; }
 
     // the infection spreads out from the giant once the scene has faded in
     if (first) litAt = now;
-    const spread = debug.spread ?? (opts.still || debug.lit ? 999 : Math.max(0, (now - litAt) / 1000 - 0.7) * 7);
+    const spread = debug.spread ?? (calmOnly || debug.lit ? 999 : Math.max(0, (now - litAt) / 1000 - 0.7) * 7);
     const litOf = (d: number) => smooth(d - 0.5, d + 1.5, spread) + 0.9 * Math.exp(-Math.pow((spread - d) * 0.7, 2));
 
     // a slow orbit; on portrait screens it's small, so the clumps close to the lens stay in frame
-    const ang = (portrait ? 0.05 : 0.2) * Math.sin(t * 0.06) + mx * (portrait ? 0.05 : 0.2);
-    camera.position.set(Math.sin(ang) * dist, (portrait ? 1.4 : 1.9) + my * 0.4 + 0.15 * Math.sin(t * 0.08), Math.cos(ang) * dist);
-    target.set(shift, (portrait ? 2.0 : 2.6) + my * 0.2 + 0.1 * Math.sin(t * 0.11), 0);
+    const ct = calmOnly ? 0 : t;
+    const ang = (portrait ? 0.05 : 0.2) * Math.sin(ct * 0.06) + mx * (portrait ? 0.05 : 0.2);
+    camera.position.set(Math.sin(ang) * dist, (portrait ? 1.4 : 1.9) + my * 0.4 + 0.15 * Math.sin(ct * 0.08), Math.cos(ang) * dist);
+    target.set(shift, (portrait ? 2.0 : 2.6) + my * 0.2 + 0.1 * Math.sin(ct * 0.11), 0);
     if (debug.cam) { camera.position.fromArray(debug.cam[0]); target.fromArray(debug.cam[1]); }
     camera.lookAt(target);
     camera.updateMatrixWorld();
@@ -1634,14 +1638,14 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
       m.userData.lit.value = litOf(d);
       m.rotation.z = 0.025 * Math.sin(t * 0.5 + s * 1.3);
       m.rotation.x = 0.02 * Math.sin(t * 0.41 + s);
-      const hop = i % 2 ? kick : Math.exp(-((((t * BPM) / 60 + 0.5) % 1) * 5));
+      const hop = i % 2 ? kick : beat(0.5);
       m.userData.cap.scale.set(1 + 0.03 * hop, 1 - 0.04 * hop, 1 + 0.03 * hop);
       m.userData.gills?.color.setScalar((0.8 + 0.5 * hop) * Math.min(1, litOf(d)));
     }));
     minis.forEach(({ m, d }) => {
       const s = m.userData.seed as number;
       // they bounce on the kick, alternating
-      const hop = s % 2 ? kick : Math.exp(-((((t * BPM) / 60 + 0.5) % 1) * 5));
+      const hop = s % 2 ? kick : beat(0.5);
       (m.userData.cap as THREE.Object3D).scale.set(1 + 0.05 * hop, 1 - 0.07 * hop, 1 + 0.05 * hop);
       const gk = (0.85 + 0.5 * hop) * Math.min(1, litOf(d));
       (m.userData.gills as THREE.MeshBasicMaterial).color.setScalar(gk);
@@ -1692,7 +1696,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     raf = requestAnimationFrame(loop);
   }
   function sync() {
-    const go = !opts.still && visible && !document.hidden;
+    const go = visible && !document.hidden;
     if (go && !running) { running = true; last = 0; raf = requestAnimationFrame(loop); }
     if (!go && running) { running = false; cancelAnimationFrame(raf); }
   }
