@@ -56,14 +56,14 @@ const mask = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://w
   if (wm && matchMedia('(pointer: fine)').matches && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
     let tx = 0, ty = 0, x = 0, y = 0, raf = 0;
     const step = () => {
-      x += (tx - x) * 0.1; y += (ty - y) * 0.1;
+      x += (tx - x) * 0.05; y += (ty - y) * 0.05;
       wm.style.setProperty('--ex', `${(1.1 + x).toFixed(2)}px`);
       wm.style.setProperty('--ey', `${(2.6 + y).toFixed(2)}px`);
       raf = Math.abs(tx - x) + Math.abs(ty - y) > 0.01 ? requestAnimationFrame(step) : 0;
     };
     addEventListener('pointermove', (e) => {
-      tx = (e.clientX / innerWidth - 0.5) * 5;
-      ty = (e.clientY / innerHeight - 0.5) * 3.2;
+      tx = (e.clientX / innerWidth - 0.5) * 3;
+      ty = (e.clientY / innerHeight - 0.5) * 2;
       if (!raf) raf = requestAnimationFrame(step);
     }, { passive: true });
   }

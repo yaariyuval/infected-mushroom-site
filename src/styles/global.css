@@ -245,14 +245,14 @@ img { display: block; max-width: 100%; }
   inset: 0 auto 0 -100%;
   width: 100%;
   /* iridescent, like the film on the mushrooms' caps: pink, a white core, violet */
-  background: linear-gradient(105deg, transparent 38%, rgb(255 60 190 / 0.7) 45%, #fff 49.5%, #fff 50.5%, rgb(130 80 255 / 0.7) 55%, transparent 62%);
+  background: linear-gradient(105deg, transparent 32%, rgb(255 60 190 / 0.35) 43%, rgb(255 255 255 / 0.65) 50%, rgb(130 80 255 / 0.35) 57%, transparent 68%);
   transform: translateX(0);
-  animation: wm-glint 9s cubic-bezier(0.45, 0, 0.25, 1) 2.5s infinite;
+  animation: wm-glint 14s cubic-bezier(0.37, 0, 0.63, 1) 2.5s infinite;
   will-change: transform;
 }
 @keyframes wm-glint {
   0% { transform: translateX(0); }
-  30%, 100% { transform: translateX(200%); }
+  36%, 100% { transform: translateX(200%); }
 }
 
 .hero-meta {
