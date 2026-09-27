@@ -18,6 +18,11 @@ const layers = Array.from({ length: DEPTH }, (_, k) => {
   const i = DEPTH - k, t = Math.pow((i - 1) / (DEPTH - 1), 0.75);
   return { i, fill: hex(FRONT.map((f, j) => f + (BACK[j] - f) * t)) };
 });
+// each line of letters gets its own face gradient (the I's tip hangs below the first line)
+const subpaths = D.split('M').filter(Boolean).map((p) => 'M' + p);
+const minY = (p: string) => Math.min(...[...p.matchAll(/[ML](-?\d+) (-?\d+)/g)].map((m) => +m[2]));
+const ROW1 = subpaths.filter((p) => minY(p) < 300).join('');
+const ROW2 = subpaths.filter((p) => minY(p) >= 300).join('');
 // the same shape as a CSS mask, for the glint
 const mask = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='${VIEW}'><path fill-rule='evenodd' d='${D}'/></svg>`)}")`;
 ---
@@ -25,12 +30,15 @@ const mask = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://w
   <svg class="wm-svg" viewBox={VIEW} aria-hidden="true">
     <defs>
       <path id="im-word" fill-rule="evenodd" d={D} />
+      <path id="im-row1" fill-rule="evenodd" d={ROW1} />
+      <path id="im-row2" fill-rule="evenodd" d={ROW2} />
       <!-- the face: bright at the top of each line of letters, deeper aqua toward the bottom -->
-      <linearGradient id="wm-face" gradientUnits="userSpaceOnUse" x1="0" y1="24" x2="0" y2="424" spreadMethod="repeat">
+      <linearGradient id="wm-face1" gradientUnits="userSpaceOnUse" x1="0" y1="41" x2="0" y2="410">
         <stop offset="0" stop-color="#a6fdff" />
         <stop offset="0.3" stop-color="#5ff4fb" />
         <stop offset="1" stop-color="#20b9d4" />
       </linearGradient>
+      <linearGradient id="wm-face2" href="#wm-face1" y1="424" y2="766" />
       <clipPath id="wm-clip"><use href="#im-word" /></clipPath>
       <!-- the lower edges of the face, where the bevel turns away from the light -->
       <mask id="wm-lower" maskUnits="userSpaceOnUse" x="-10" y="-10" width="2192" height="884">
@@ -43,7 +51,8 @@ const mask = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://w
     </g>
     <g clip-path="url(#wm-clip)">
       <use href="#im-word" fill="#effffe" />
-      <use href="#im-word" fill="url(#wm-face)" transform="translate(0 7)" />
+      <use href="#im-row1" fill="url(#wm-face1)" transform="translate(0 7)" />
+      <use href="#im-row2" fill="url(#wm-face2)" transform="translate(0 7)" />
       <use href="#im-word" fill="#1b9db4" mask="url(#wm-lower)" />
     </g>
   </svg>
