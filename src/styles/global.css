@@ -230,7 +230,7 @@ img { display: block; max-width: 100%; }
 }
 /* each layer of the extrusion steps a little further back */
 .wm-depth use { transform: translate(calc(var(--i) * var(--ex)), calc(var(--i) * var(--ey))); }
-/* a glint of light crosses the face every few seconds */
+/* a broad, faint light drifts slowly back and forth over the face */
 .wm-glint {
   position: absolute;
   inset: 0;
@@ -244,15 +244,15 @@ img { display: block; max-width: 100%; }
   position: absolute;
   inset: 0 auto 0 -100%;
   width: 100%;
-  /* iridescent, like the film on the mushrooms' caps: pink, a white core, violet */
-  background: linear-gradient(105deg, transparent 32%, rgb(255 60 190 / 0.35) 43%, rgb(255 255 255 / 0.65) 50%, rgb(130 80 255 / 0.35) 57%, transparent 68%);
-  transform: translateX(0);
-  animation: wm-glint 14s cubic-bezier(0.37, 0, 0.63, 1) 2.5s infinite;
+  /* a hint of the mushrooms' iridescence at its edges */
+  background: linear-gradient(105deg, transparent 12%, rgb(255 110 210 / 0.06) 34%, rgb(255 255 255 / 0.17) 50%, rgb(150 110 255 / 0.06) 66%, transparent 88%);
+  transform: translateX(60%);
+  animation: wm-glint 16s ease-in-out infinite alternate;
   will-change: transform;
 }
 @keyframes wm-glint {
-  0% { transform: translateX(0); }
-  36%, 100% { transform: translateX(200%); }
+  from { transform: translateX(60%); }
+  to { transform: translateX(140%); }
 }
 
 .hero-meta {
