@@ -10,10 +10,9 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
-import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { rng, lerp, smooth, noise3, fbm2 } from './grove-util';
+import { rng, lerp, smooth, noise3, fbm2, computeNormals } from './grove-util';
 import { BPM, NOISE_GLSL, fungiTime, fungiKick, makeTrumpet, makeForestShroom, type CapKind, type Trumpet, type ForestShroom } from './fungi';
-import { makePsilocybeCluster, type Psilocybe, type Species } from './psilocybe';
+import { makePsilocybeCluster, clonePsilocybeCluster, type Psilocybe, type Species } from './psilocybe';
 
 const CYAN = new THREE.Color(0.05, 0.7, 1.0);
 const MAGENTA = new THREE.Color(1.0, 0.08, 0.6);
@@ -164,11 +163,31 @@ function withGlow<T extends THREE.MeshStandardMaterial>(mat: T, color: THREE.Col
   return mat;
 }
 
+// A lathe whose last column wraps round to the first, so the seam is already welded and the normals come out
+// smooth without a merge pass. Same vertex layout and winding as THREE.LatheGeometry otherwise.
 function lathe(points: THREE.Vector2[], segs: number) {
-  let g: THREE.BufferGeometry = new THREE.LatheGeometry(points, segs);
-  g.deleteAttribute('uv');
-  g.deleteAttribute('normal');
-  g = mergeVertices(g, 1e-4);
+  const n = points.length;
+  const pos = new Float32Array(segs * n * 3);
+  for (let i = 0; i < segs; i++) {
+    const phi = (i / segs) * Math.PI * 2, sn = Math.sin(phi), cs = Math.cos(phi);
+    for (let j = 0; j < n; j++) {
+      const k = (i * n + j) * 3;
+      pos[k] = points[j].x * sn; pos[k + 1] = points[j].y; pos[k + 2] = points[j].x * cs;
+    }
+  }
+  const idx = new (segs * n > 65535 ? Uint32Array : Uint16Array)(segs * (n - 1) * 6);
+  let q = 0;
+  for (let i = 0; i < segs; i++) {
+    const i2 = (i + 1) % segs;
+    for (let j = 0; j < n - 1; j++) {
+      const a = i * n + j, b = i2 * n + j, c = i2 * n + j + 1, d = i * n + j + 1;
+      idx[q++] = a; idx[q++] = b; idx[q++] = d;
+      idx[q++] = c; idx[q++] = d; idx[q++] = b;
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setIndex(new THREE.BufferAttribute(idx, 1));
   return g;
 }
 
@@ -218,7 +237,7 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
     }
     stemGeo.setAttribute('aGlow', new THREE.BufferAttribute(glow, 1));
     stemGeo.setAttribute('color', new THREE.BufferAttribute(scol, 3));
-    stemGeo.computeVertexNormals();
+    computeNormals(stemGeo);
   }
   const stemMat = withGlow(
     new THREE.MeshStandardMaterial({ color: o.real ? 0xf4f0e8 : 0xcfc6ee, vertexColors: true, roughness: 0.8, metalness: 0, emissive: o.real ? 0x1a1612 : 0x0a0718 }),
@@ -255,7 +274,7 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
       sk.setAttribute('color', new THREE.BufferAttribute(kc, 3));
     }
     sk.setAttribute('aLow', new THREE.BufferAttribute(lowA, 1));
-    sk.computeVertexNormals();
+    computeNormals(sk);
     const skMat = new THREE.MeshStandardMaterial({ color: o.real ? 0xfaf6ee : 0xd9d0f5, vertexColors: !!o.real, roughness: 0.85, side: THREE.DoubleSide, emissive: o.real ? 0x1c1812 : 0x1a1238 });
     // the hanging edge drifts like light fabric in a slow draught
     skMat.onBeforeCompile = (sh) => {
@@ -357,7 +376,7 @@ function makeMushroom(o: ShroomOpts, pulse: { value: number }) {
     capGeo.setAttribute('aGlow', new THREE.BufferAttribute(glow, 1));
     capGeo.setAttribute('aUnderG', new THREE.BufferAttribute(underG, 1));
     capGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    capGeo.computeVertexNormals();
+    computeNormals(capGeo);
   }
   const capMat = withGlow(
     new THREE.MeshPhysicalMaterial({
@@ -1089,7 +1108,7 @@ function makeGround(inf: Infection) {
     col.set([c.r, c.g, c.b], i * 3);
   }
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  g.computeVertexNormals();
+  computeNormals(g);
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, { uT: inf.t, uKick: inf.kick, uSpread: inf.spread, uPtr: inf.ptr, uSrc: inf.src, uOrigin: inf.origin, uWave: inf.wave, uRing: { value: new THREE.Vector3(RING.x, RING.z, RING.r) } });
@@ -1268,7 +1287,18 @@ export interface GroveHandle { stop(): void }
 
 type Placed<T> = { m: T; x: number; z: number; d: number };
 
-export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirstFrame?: () => void }): GroveHandle {
+type StartOpts = { still: boolean; onFirstFrame?: () => void; onError?: (e: unknown) => void };
+
+export function start(canvas: HTMLCanvasElement, opts: StartOpts): GroveHandle {
+  let handle: GroveHandle | null = null, cancelled = false;
+  build(canvas, opts).then((h) => (cancelled ? h.stop() : (handle = h)), (e) => opts.onError?.(e));
+  return { stop() { cancelled = true; handle?.stop(); } };
+}
+
+// let the browser handle input and paint between the heavier steps, so the page stays responsive while the grove builds
+const breathe = () => new Promise<void>((r) => setTimeout(r, 0));
+
+async function build(canvas: HTMLCanvasElement, opts: StartOpts): Promise<GroveHandle> {
   const debug = (window as any).__groveDebug || {}; // screenshot/benchmark hook
   installHaze();
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', alpha: false });
@@ -1318,9 +1348,10 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     ptr: { value: new THREE.Vector3(0, 0, 0) },
     src: { value: Array.from({ length: MAX_SRC }, () => new THREE.Vector4(0, 0, 1, 0)) },
   };
+  await breathe();
   const ground = makeGround(inf);
   scene.add(ground);
-  if (debug.expose) (window as any).__groveScene = scene;
+  if (debug.expose) Object.assign(window as any, { __groveScene: scene, __groveRenderer: renderer });
   const shadowMat = contactShadow();
   const shadow = (x: number, z: number, r: number) => {
     const sh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), shadowMat);
@@ -1337,6 +1368,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   const [TX, TZ] = onRing(222, 0.3);
   inf.wave.value.set(TX, TZ);
 
+  await breathe();
   /* the amanitas: the giant stands on the ring's right, its kin further round */
   const ringAt = (deg: number, dr = 0) => { const [x, z] = onRing(deg, dr); return { x, z }; };
   const amanitaDefs: (ShroomOpts & { x: number; y: number; z: number; s: number })[] = [
@@ -1360,6 +1392,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     return { m, x: d.x, z: d.z, d: fromOrigin(d.x, d.z) };
   });
 
+  await breathe();
   /* the IM30 trumpets: a towering cluster on the far side of the ring, leaning apart */
   const trumpetDefs = [
     { x: TX, z: TZ, L: 3.1, s: 1.15, bend: 0.35, tilt: 0.05, dir: 0.4, seed: 11, detail: 1 },
@@ -1381,6 +1414,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     return { m, x: d.x, z: d.z, d: fromOrigin(d.x, d.z) };
   });
 
+  await breathe();
   /* the forest: the IM30 grove's caps close the ring, then recede into the haze */
   const G = (r: number, g: number, b: number) => new THREE.Color(r, g, b);
   const forestDefs: { x: number; z: number; s: number; kind: CapKind; cap: number; gill: THREE.Color; young?: number; detail?: number }[] = [
@@ -1423,6 +1457,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     }
   });
 
+  await breathe();
   /* little purple mushrooms with red warts, in twos and threes around the ring */
   const minis: Placed<THREE.Group>[] = [];
   [
@@ -1461,22 +1496,25 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   trumpetLight.position.set(TX + 0.3, 3.2, TZ + 1.2);
   scene.add(trumpetLight);
 
+  await breathe();
   /* Psilocybe along the near edge of the ring, and in the clearing inside it: a cubensis clump right under the beam,
      the others around it. On portrait screens the edge clumps shift so they stay in frame. */
-  const psiloDefs: { sp: Species; seed: number; n: number; s: number; ps: number; land: [number, number]; port: [number, number]; ry: number; detail?: number }[] = [
+  // (`like`: a turned copy of an earlier clump, sharing its geometry, which keeps the load quick)
+  const psiloDefs: { sp: Species; seed: number; n: number; s: number; ps: number; land: [number, number]; port: [number, number]; ry: number; detail?: number; like?: number }[] = [
     { sp: 'cubensis', seed: 21, n: 6, s: 0.42, ps: 0.55, land: onRing(30, 0.1), port: onRing(12, 0.3), ry: 0.6, detail: 0.6 },
     { sp: 'cyanescens', seed: 5, n: 8, s: 0.3, ps: 0.4, land: onRing(6, 0.1), port: onRing(-12, 0.3), ry: -0.4, detail: 0.6 },
     // liberty caps don't clump: a loose troop scattered through the moss
     { sp: 'semilanceata', seed: 33, n: 9, s: 0.26, ps: 0.26, land: onRing(44, 0.5), port: onRing(32, 0.3), ry: 0.3, detail: 0.6 },
     // the clearing
     { sp: 'cubensis', seed: 47, n: 8, s: 0.5, ps: 0.55, land: [0.95, 0.55], port: [0.8, 0.6], ry: 1.9, detail: 0.7 },
-    { sp: 'cyanescens', seed: 58, n: 7, s: 0.34, ps: 0.38, land: [-2.2, 1.1], port: [-1.8, 1.3], ry: 0.8, detail: 0.45 },
-    { sp: 'semilanceata', seed: 61, n: 10, s: 0.3, ps: 0.3, land: [2.0, 1.6], port: [1.7, 1.6], ry: -0.5, detail: 0.45 },
-    { sp: 'cubensis', seed: 73, n: 5, s: 0.32, ps: 0.34, land: [-1.2, -2.5], port: [-1.2, -2.5], ry: 2.6, detail: 0.45 },
-    { sp: 'cyanescens', seed: 84, n: 6, s: 0.3, ps: 0.32, land: [2.4, -2.1], port: [2.2, -2.1], ry: -1.2, detail: 0.45 },
+    { sp: 'cyanescens', seed: 58, n: 7, s: 0.34, ps: 0.38, land: [-2.2, 1.1], port: [-1.8, 1.3], ry: 0.8 + Math.PI, like: 1 },
+    { sp: 'semilanceata', seed: 61, n: 10, s: 0.3, ps: 0.3, land: [2.0, 1.6], port: [1.7, 1.6], ry: -0.5 + 2.2, like: 2 },
+    { sp: 'cubensis', seed: 73, n: 5, s: 0.32, ps: 0.34, land: [-1.2, -2.5], port: [-1.2, -2.5], ry: 2.6, like: 0 },
+    { sp: 'cyanescens', seed: 84, n: 6, s: 0.3, ps: 0.32, land: [2.4, -2.1], port: [2.2, -2.1], ry: -1.2, like: 1 },
   ];
-  const psilos = psiloDefs.map((d) => {
-    const c = makePsilocybeCluster(d.sp, d.seed, d.n, d.detail!);
+  const psilos: (ReturnType<typeof makePsilocybeCluster> & { place: (portrait: boolean) => void })[] = [];
+  psiloDefs.forEach((d) => {
+    const c = d.like != null ? clonePsilocybeCluster(psilos[d.like]) : makePsilocybeCluster(d.sp, d.seed, d.n, d.detail!);
     c.group.rotation.y = d.ry;
     scene.add(c.group);
     const sh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), shadowMat);
@@ -1492,9 +1530,10 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
       c.members.forEach((m) => (m.userData.d = fromOrigin(x, z)));
     };
     place(false);
-    return { ...c, place };
+    psilos.push({ ...c, place });
   });
 
+  await breathe();
   const mycena = makeMycena(320, [
     ...amanitaDefs.slice(0, 4).map((d) => ({ x: d.x, z: d.z, r: 0.25 * d.r * d.s + 0.35 })),
     ...trumpetDefs.map((d) => ({ x: d.x, z: d.z, r: 0.5 * d.s + 0.3 })),
@@ -1570,6 +1609,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   if (skip.includes('minis')) minis.forEach((f) => (f.m.visible = false));
   if (skip.includes('psilos')) psilos.forEach((c) => (c.group.visible = false));
 
+  await breathe();
   // post: bloom for the bioluminescence, then the grade
   const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 2 }));
   composer.addPass(new RenderPass(scene, camera));
@@ -1648,7 +1688,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
 
     // the infection spreads out from the giant once the scene has faded in
     if (first) litAt = now;
-    const spread = debug.spread ?? (calmOnly || debug.lit ? 999 : Math.max(0, (now - litAt) / 1000 - 0.7) * 7);
+    const spread = debug.spread ?? (calmOnly || debug.lit ? 999 : Math.max(0, (now - litAt) / 1000 - 0.4) * 7);
     const litOf = (d: number) => smooth(d - 0.5, d + 1.5, spread) + 0.9 * Math.exp(-Math.pow((spread - d) * 0.7, 2));
 
     // a slow orbit; on portrait screens it's small, so the clumps close to the lens stay in frame
@@ -1739,7 +1779,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     grade.uniforms.uT.value = t;
 
     composer.render();
-    if (first) { first = false; opts.onFirstFrame?.(); }
+    if (first) { first = false; performance.mark('grove:first-frame'); opts.onFirstFrame?.(); }
   }
 
   let running = false, visible = true, raf = 0, samples = 0, acc = 0, last = 0, warm = 90;
@@ -1761,23 +1801,45 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     frame(now);
     raf = requestAnimationFrame(loop);
   }
+  let ready = false, stopped = false;
   function sync() {
-    const go = visible && !document.hidden;
+    const go = ready && visible && !document.hidden;
     if (go && !running) { running = true; last = 0; raf = requestAnimationFrame(loop); }
     if (!go && running) { running = false; cancelAnimationFrame(raf); }
   }
 
-  const ro = new ResizeObserver(() => { resize(); if (!running) frame(performance.now()); });
+  const ro = new ResizeObserver(() => { resize(); if (ready && !running) frame(performance.now()); });
   ro.observe(canvas);
   const io = new IntersectionObserver(([e]) => { visible = e.isIntersecting; sync(); });
   io.observe(canvas);
   document.addEventListener('visibilitychange', sync);
   resize();
-  frame(performance.now());
-  sync();
+  performance.mark('grove:built');
+  // Compile every shader before the first frame, in parallel and off the main thread where the browser can
+  // (KHR_parallel_shader_compile), rather than stalling on each one inside the first render. The scene is drawn
+  // into the composer's target, which needs different programs from drawing to the screen, so compile for that.
+  // (the passes draw a bare full-screen triangle; the same geometry gets the same programs)
+  const passes = new THREE.Scene(), quad = new THREE.BufferGeometry();
+  quad.setAttribute('position', new THREE.Float32BufferAttribute([-1, 3, 0, -1, -1, 0, 3, -1, 0], 3));
+  quad.setAttribute('uv', new THREE.Float32BufferAttribute([0, 2, 0, 0, 2, 0], 2));
+  for (const m of [bloom.materialHighPassFilter, ...bloom.separableBlurMaterials, bloom.compositeMaterial, bloom.blendMaterial]) passes.add(new THREE.Mesh(quad, m));
+  const toScreen = new THREE.Scene();
+  toScreen.add(new THREE.Mesh(quad, grade.material));
+  renderer.setRenderTarget(composer.readBuffer);
+  const compiled = Promise.all([renderer.compileAsync(scene, camera), renderer.compileAsync(passes, camera)]);
+  renderer.setRenderTarget(null);
+  const compiledLast = renderer.compileAsync(toScreen, camera);
+  Promise.all([compiled, compiledLast]).catch(() => {}).then(() => {
+    performance.mark('grove:compiled');
+    if (stopped) return;
+    ready = true;
+    frame(performance.now());
+    sync();
+  });
 
   return {
     stop() {
+      stopped = true;
       running = false;
       cancelAnimationFrame(raf);
       ro.disconnect(); io.disconnect();

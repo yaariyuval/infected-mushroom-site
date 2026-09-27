@@ -67,10 +67,13 @@ npm run build    # outputs to dist/
   - A violet sky with a ringed planet, a crescent moon, shooting stars, a flying saucer with a tractor beam, and drifting spores.
   - The glow pulses on a 145 BPM kick. A final grade adds a vignette, film grain and slight lens fringing.
 - **Performance:**
-  - The 3D code is about 150 KB gzipped and loads only after the page is interactive. Until then, and on devices without WebGL, the hero shows a gradient.
+  - The 3D code is about 170 KB gzipped. It starts downloading as soon as the page is parsed and the scene builds once the page has settled, in steps that let the page stay responsive.
+  - Shaders are compiled before the first frame, in parallel where the browser supports it (`KHR_parallel_shader_compile`).
+  - Until the first frame, and on devices without WebGL, the hero shows a tiny blurred render of the scene (about 1.5 KB each for landscape and portrait, inlined in the CSS). After changing the scene's layout, regenerate them against a running dev server with `npm i --no-save playwright-core && node scripts/hero-poster.mjs`.
+  - Geometry is built straight into typed arrays; the psilocybe clumps in the ring's clearing are turned copies sharing their geometry.
   - Rendering resolution adapts to how fast frames draw.
   - The scene pauses when off-screen or in a background tab, and for visitors with *reduce motion* set it keeps only the slow drift: half speed, no beat pulses, no intro flash and a still camera.
-- **Logo:** the hero wordmark (`src/components/Wordmark.astro`) and the header emblem and favicon (`src/components/Emblem.astro`) are vector traces of the band's own logo, used with their permission. In the hero the wordmark is drawn solid: an extruded body behind a bevelled face, an iridescent glint crossing it every few seconds, and (with a mouse) depth that shifts with the pointer.
+- **Logo:** the hero wordmark (`src/components/Wordmark.astro`) and the header emblem and favicon (`src/components/Emblem.astro`) are vector traces of the band's own logo, used with their permission. In the hero the wordmark is drawn solid: an extruded body behind a bevelled face, a faint light drifting slowly across it, and (with a mouse) depth that shifts with the pointer.
 - **Type:** Tektur is the display face. It's a blocky, chamfered variable font picked to match the wordmark, and city names widen on hover. Geologica is used for text and Martian Mono for dates and labels. All fonts are self-hosted.
 - **Colour:** indigo night, moonlight text, and bioluminescent cyan and magenta, taken from the IM30, IM25 and Head of NASA covers.
 - **Covers** live in `public/media/covers/` and can be replaced from the CMS.

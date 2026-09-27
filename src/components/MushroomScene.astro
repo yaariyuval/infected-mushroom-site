@@ -24,10 +24,16 @@
     }
   }
 
+  // fetch the scene's code straight away; build it once the page has settled
+  const load = hasWebGL() ? import('../scripts/grove') : null;
+  load?.catch(() => {});
+
   function boot() {
-    import('../scripts/grove')
+    performance.mark('grove:boot');
+    load!
       .then(({ start }) => {
-        const handle = start(canvas, { still, onFirstFrame: () => hero.classList.add('is-lit') });
+        performance.mark('grove:loaded');
+        const handle = start(canvas, { still, onFirstFrame: () => hero.classList.add('is-lit'), onError: fallback });
         canvas.addEventListener('webglcontextlost', (e) => {
           e.preventDefault();
           handle.stop();
@@ -37,7 +43,7 @@
       .catch(fallback);
   }
 
-  if (!hasWebGL()) fallback('WebGL unavailable');
-  else if ('requestIdleCallback' in window) requestIdleCallback(boot, { timeout: 1200 });
-  else setTimeout(boot, 150);
+  if (!load) fallback('WebGL unavailable');
+  else if ('requestIdleCallback' in window) requestIdleCallback(boot, { timeout: 600 });
+  else setTimeout(boot, 50);
 </script>

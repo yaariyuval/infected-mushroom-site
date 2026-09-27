@@ -9,7 +9,7 @@
 //   striate; a long, thin, wavy cream stem; crowded purple-brown gills; scattered in troops, not clumps
 // All bruise blue; here the bruises glow cyan and pulse on the kick.
 import * as THREE from 'three';
-import { lerp, smooth, rng, noise3 } from './grove-util';
+import { lerp, smooth, rng, noise3, computeNormals } from './grove-util';
 import { BPM, NOISE_GLSL, fungiTime, fungiKick } from './fungi';
 
 export type Species = 'cubensis' | 'cyanescens' | 'semilanceata';
@@ -80,7 +80,7 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
       hh[i] = t;
     }
     sGeo.setAttribute('aT', new THREE.BufferAttribute(hh, 1));
-    sGeo.computeVertexNormals();
+    computeNormals(sGeo);
   }
   const stemMat = new THREE.MeshStandardMaterial({ color: cub ? 0xf2ead8 : semi ? 0xf0e4c8 : 0xeee8e2, roughness: 0.75, envMapIntensity: 0.3 });
   stemMat.onBeforeCompile = (sh) => {
@@ -132,7 +132,7 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
       col.set([k * 0.95, k * 0.9, k], i * 3);
     }
     ring.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    ring.computeVertexNormals();
+    computeNormals(ring);
     g.add(new THREE.Mesh(ring, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, side: THREE.DoubleSide, envMapIntensity: 0.2 })));
   }
 
@@ -182,7 +182,7 @@ export function makePsilocybe(sp: Species, o: PsilocybeOpts): Psilocybe {
     }
     cGeo.setAttribute('aU', new THREE.BufferAttribute(aU, 1));
     cGeo.setAttribute('aUnder', new THREE.BufferAttribute(aUnder, 1));
-    cGeo.computeVertexNormals();
+    computeNormals(cGeo);
   }
   const capMat = new THREE.MeshPhysicalMaterial({
     color: 0xffffff, roughness: cub ? 0.6 : semi ? 0.35 : 0.45, clearcoat: cub ? 0.2 : semi ? 0.8 : 0.45, clearcoatRoughness: semi ? 0.25 : 0.45,
@@ -338,5 +338,25 @@ export function makePsilocybeCluster(sp: Species, seed: number, count: number, d
     group.add(m);
     members.push(m);
   }
+  return { group, members };
+}
+
+// Another clump sharing a clump's geometry and materials: nearly free to make, and turned, scaled and set
+// somewhere else it passes for a different one.
+export function clonePsilocybeCluster(c: { group: THREE.Group; members: Psilocybe[] }) {
+  const group = new THREE.Group();
+  const members = c.members.map((m) => {
+    // Object3D.clone deep-copies userData through JSON, so set it aside and rebuild it for the copy
+    const ud = m.userData;
+    m.userData = {} as Psilocybe['userData'];
+    const k = m.clone() as Psilocybe;
+    m.userData = ud;
+    const path: number[] = [];
+    for (let o: THREE.Object3D = ud.cap; o !== m; o = o.parent!) path.unshift(o.parent!.children.indexOf(o));
+    const cap = path.reduce<THREE.Object3D>((o, i) => o.children[i], k) as THREE.Group;
+    k.userData = { ...ud, cap };
+    group.add(k);
+    return k;
+  });
   return { group, members };
 }

@@ -4,7 +4,7 @@
 // - the forest: amanita, parasol, wavy, liberty-cap and funnel mushrooms with glowing gills
 //   and a thin-film rainbow sheen on the caps
 import * as THREE from 'three';
-import { lerp, smooth, rng, noise3 } from './grove-util';
+import { lerp, smooth, rng, noise3, computeNormals } from './grove-util';
 
 export const BPM = 145;
 
@@ -116,7 +116,7 @@ export function makeTrumpet(o: TrumpetOpts): Trumpet {
   geo.setAttribute('aRho', new THREE.BufferAttribute(prho, 1));
   geo.setAttribute('aY', new THREE.BufferAttribute(py, 1));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  geo.computeVertexNormals();
+  computeNormals(geo);
 
   const lit = { value: 1 };
   const mat = new THREE.MeshPhysicalMaterial({
@@ -338,7 +338,7 @@ export function makeForestShroom(kind: CapKind, seed: number, capC: THREE.ColorR
     under[i] = row <= N ? 1 : 0;
   }
   geo.setAttribute('aUnder', new THREE.BufferAttribute(under, 1));
-  geo.computeVertexNormals();
+  computeNormals(geo);
 
   const lit = { value: 1 };
   const cap = new THREE.MeshStandardMaterial({ color: capC, roughness: 0.42, metalness: 0.05, side: THREE.DoubleSide, envMapIntensity: 0.5 });
@@ -396,7 +396,7 @@ export function makeForestShroom(kind: CapKind, seed: number, capC: THREE.ColorR
   const sg = new THREE.LatheGeometry(sp, Math.round(lerp(12, 28, detail)));
   const spos = sg.attributes.position as THREE.BufferAttribute;
   for (let i = 0; i < spos.count; i++) { const y = spos.getY(i) / H; spos.setX(i, spos.getX(i) + bend * H * y * y); }
-  sg.computeVertexNormals();
+  computeNormals(sg);
   const stemMat = new THREE.MeshStandardMaterial({ color: 0xa89ad8, roughness: 0.8, emissive: new THREE.Color(0.07, 0.05, 0.14).add(gillC.clone().multiplyScalar(0.05)), envMapIntensity: 0.15 });
   g.add(new THREE.Mesh(sg, stemMat));
   if (kind === 'amanita') {
