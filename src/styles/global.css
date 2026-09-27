@@ -214,14 +214,46 @@ img { display: block; max-width: 100%; }
 
 .title { margin: 0; line-height: 0; }
 .wordmark {
+  position: relative;
   display: block;
   width: min(92%, 780px);
+  --ex: 1.1px;
+  --ey: 2.6px;
+}
+.wm-svg {
+  display: block;
+  width: 100%;
   height: auto;
   overflow: visible;
-  /* IM30-cover aqua with a soft glow; the dark shadow keeps it legible over the bright scene */
-  filter: drop-shadow(0 0 18px rgb(98 249 252 / 0.35)) drop-shadow(0 8px 30px rgb(12 9 32 / 0.7));
+  /* a soft aqua glow; the dark shadow keeps it legible over the bright scene */
+  filter: drop-shadow(0 0 18px rgb(98 249 252 / 0.3)) drop-shadow(0 10px 26px rgb(8 5 24 / 0.75));
 }
-.wordmark .wm-fill { fill: #62f9fc; }
+/* each layer of the extrusion steps a little further back */
+.wm-depth use { transform: translate(calc(var(--i) * var(--ex)), calc(var(--i) * var(--ey))); }
+/* a glint of light crosses the face every few seconds */
+.wm-glint {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  -webkit-mask: var(--wm-mask) 0 0 / 100% 100% no-repeat;
+  mask: var(--wm-mask) 0 0 / 100% 100% no-repeat;
+}
+.wm-glint::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 -100%;
+  width: 100%;
+  /* iridescent, like the film on the mushrooms' caps: pink, a white core, violet */
+  background: linear-gradient(105deg, transparent 38%, rgb(255 60 190 / 0.7) 45%, #fff 49.5%, #fff 50.5%, rgb(130 80 255 / 0.7) 55%, transparent 62%);
+  transform: translateX(0);
+  animation: wm-glint 9s cubic-bezier(0.45, 0, 0.25, 1) 2.5s infinite;
+  will-change: transform;
+}
+@keyframes wm-glint {
+  0% { transform: translateX(0); }
+  30%, 100% { transform: translateX(200%); }
+}
 
 .hero-meta {
   display: flex;

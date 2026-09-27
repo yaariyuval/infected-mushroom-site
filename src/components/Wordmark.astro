@@ -1,13 +1,70 @@
 ---
 // The Infected Mushroom wordmark, traced from the band's logo (used with permission)
 // and rebuilt as straight-edged polygons so the diagonals stay crisp at any size.
-// Flat aqua, as on the IM30 cover.
+// IM30-cover aqua, made solid: an extruded body fading into the night behind a bevelled face,
+// a glint of light crossing it now and then, and (with a mouse) depth that shifts with the pointer,
+// like the 3D scene behind it.
 interface Props { class?: string }
 const { class: cls } = Astro.props;
+
+const D = 'M234 41L184 41L184 422L234 465L284 422L284 41ZM372 78L336 78L336 402L413 402L413 232L524 405L588 405L588 79L503 79L503 224L412 78ZM709 78L607 78L607 408L680 408L680 288L808 288L808 216L681 216L681 148L808 148L808 78ZM938 79L832 79L832 408L1045 408L1045 336L909 336L909 265L1048 265L1048 196L909 196L909 148L1048 148L1048 79ZM1203 76L1114 76L1072 129L1072 351L1114 405L1292 405L1292 332L1161 332L1161 148L1292 148L1292 76ZM1474 76L1337 76L1316 145L1427 145L1427 408L1500 408L1500 148L1590 148L1612 87L1612 76ZM1740 77L1632 77L1632 408L1848 408L1848 336L1709 336L1709 268L1848 268L1848 196L1709 196L1709 148L1848 148L1848 77ZM1978 78L1868 78L1868 405L2128 405L2128 130L2082 78ZM1994 149L1944 149L1944 329L2044 329L2044 149ZM88 424L40 424L40 824L138 746L138 532L184 565L184 786L230 824L282 790L282 562L327 528L327 752L424 824L424 424L330 424L234 500L135 424ZM490 425L452 425L452 714L489 764L632 764L664 711L664 430L584 430L584 692L528 692L528 425ZM788 424L697 424L676 507L792 680L689 680L660 764L856 764L880 661L776 499L858 499L880 424ZM939 426L896 426L896 764L976 764L976 621L1028 621L1028 764L1112 764L1112 425L1028 425L1028 548L976 548L976 426ZM1218 425L1132 425L1132 764L1208 764L1208 656L1222 656L1282 764L1372 764L1304 643L1344 594L1344 481L1302 425ZM1478 424L1418 424L1372 486L1372 711L1414 764L1542 764L1584 703L1584 481L1538 424ZM1710 424L1650 424L1604 486L1604 711L1646 764L1774 764L1816 707L1816 481L1770 424ZM1886 425L1840 425L1840 764L1917 764L1917 604L1973 728L2004 728L2052 609L2052 764L2132 764L2132 427L2042 427L1985 544L1932 425ZM1234 497L1208 497L1208 577L1260 577L1260 497ZM1474 505L1448 505L1448 688L1500 688L1500 505ZM1706 505L1680 505L1680 688L1732 688L1732 505Z';
+const VIEW = '-10 -10 2192 884';
+
+// the extrusion, back to front: from the night's violet up to a deep aqua just behind the face
+const DEPTH = 16;
+const hex = (c: number[]) => '#' + c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
+const FRONT = [14, 110, 130], BACK = [22, 10, 52];
+const layers = Array.from({ length: DEPTH }, (_, k) => {
+  const i = DEPTH - k, t = Math.pow((i - 1) / (DEPTH - 1), 0.75);
+  return { i, fill: hex(FRONT.map((f, j) => f + (BACK[j] - f) * t)) };
+});
+// the same shape as a CSS mask, for the glint
+const mask = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='${VIEW}'><path fill-rule='evenodd' d='${D}'/></svg>`)}")`;
 ---
-<svg class={cls} viewBox="-10 -10 2192 884" aria-hidden="true">
-  <defs>
-    <path id="im-word" fill-rule="evenodd" d="M234 41L184 41L184 422L234 465L284 422L284 41ZM372 78L336 78L336 402L413 402L413 232L524 405L588 405L588 79L503 79L503 224L412 78ZM709 78L607 78L607 408L680 408L680 288L808 288L808 216L681 216L681 148L808 148L808 78ZM938 79L832 79L832 408L1045 408L1045 336L909 336L909 265L1048 265L1048 196L909 196L909 148L1048 148L1048 79ZM1203 76L1114 76L1072 129L1072 351L1114 405L1292 405L1292 332L1161 332L1161 148L1292 148L1292 76ZM1474 76L1337 76L1316 145L1427 145L1427 408L1500 408L1500 148L1590 148L1612 87L1612 76ZM1740 77L1632 77L1632 408L1848 408L1848 336L1709 336L1709 268L1848 268L1848 196L1709 196L1709 148L1848 148L1848 77ZM1978 78L1868 78L1868 405L2128 405L2128 130L2082 78ZM1994 149L1944 149L1944 329L2044 329L2044 149ZM88 424L40 424L40 824L138 746L138 532L184 565L184 786L230 824L282 790L282 562L327 528L327 752L424 824L424 424L330 424L234 500L135 424ZM490 425L452 425L452 714L489 764L632 764L664 711L664 430L584 430L584 692L528 692L528 425ZM788 424L697 424L676 507L792 680L689 680L660 764L856 764L880 661L776 499L858 499L880 424ZM939 426L896 426L896 764L976 764L976 621L1028 621L1028 764L1112 764L1112 425L1028 425L1028 548L976 548L976 426ZM1218 425L1132 425L1132 764L1208 764L1208 656L1222 656L1282 764L1372 764L1304 643L1344 594L1344 481L1302 425ZM1478 424L1418 424L1372 486L1372 711L1414 764L1542 764L1584 703L1584 481L1538 424ZM1710 424L1650 424L1604 486L1604 711L1646 764L1774 764L1816 707L1816 481L1770 424ZM1886 425L1840 425L1840 764L1917 764L1917 604L1973 728L2004 728L2052 609L2052 764L2132 764L2132 427L2042 427L1985 544L1932 425ZM1234 497L1208 497L1208 577L1260 577L1260 497ZM1474 505L1448 505L1448 688L1500 688L1500 505ZM1706 505L1680 505L1680 688L1732 688L1732 505Z" />
-  </defs>
-  <use href="#im-word" class="wm-fill" />
-</svg>
+<span class:list={['wm', cls]} style={`--wm-mask: ${mask}`}>
+  <svg class="wm-svg" viewBox={VIEW} aria-hidden="true">
+    <defs>
+      <path id="im-word" fill-rule="evenodd" d={D} />
+      <!-- the face: bright at the top of each line of letters, deeper aqua toward the bottom -->
+      <linearGradient id="wm-face" gradientUnits="userSpaceOnUse" x1="0" y1="24" x2="0" y2="424" spreadMethod="repeat">
+        <stop offset="0" stop-color="#a6fdff" />
+        <stop offset="0.3" stop-color="#5ff4fb" />
+        <stop offset="1" stop-color="#20b9d4" />
+      </linearGradient>
+      <clipPath id="wm-clip"><use href="#im-word" /></clipPath>
+      <!-- the lower edges of the face, where the bevel turns away from the light -->
+      <mask id="wm-lower" maskUnits="userSpaceOnUse" x="-10" y="-10" width="2192" height="884">
+        <use href="#im-word" fill="#fff" />
+        <use href="#im-word" fill="#000" transform="translate(0 -8)" />
+      </mask>
+    </defs>
+    <g class="wm-depth">
+      {layers.map((l) => <use href="#im-word" fill={l.fill} style={`--i: ${l.i}`} />)}
+    </g>
+    <g clip-path="url(#wm-clip)">
+      <use href="#im-word" fill="#effffe" />
+      <use href="#im-word" fill="url(#wm-face)" transform="translate(0 7)" />
+      <use href="#im-word" fill="#1b9db4" mask="url(#wm-lower)" />
+    </g>
+  </svg>
+  <span class="wm-glint" aria-hidden="true"></span>
+</span>
+
+<script>
+  // With a mouse, the extrusion follows the pointer the way the scene's camera does, so the logo sits in the same space.
+  const wm = document.querySelector<HTMLElement>('.wm');
+  if (wm && matchMedia('(pointer: fine)').matches && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    let tx = 0, ty = 0, x = 0, y = 0, raf = 0;
+    const step = () => {
+      x += (tx - x) * 0.1; y += (ty - y) * 0.1;
+      wm.style.setProperty('--ex', `${(1.1 + x).toFixed(2)}px`);
+      wm.style.setProperty('--ey', `${(2.6 + y).toFixed(2)}px`);
+      raf = Math.abs(tx - x) + Math.abs(ty - y) > 0.01 ? requestAnimationFrame(step) : 0;
+    };
+    addEventListener('pointermove', (e) => {
+      tx = (e.clientX / innerWidth - 0.5) * 5;
+      ty = (e.clientY / innerHeight - 0.5) * 3.2;
+      if (!raf) raf = requestAnimationFrame(step);
+    }, { passive: true });
+  }
+</script>
