@@ -1,6 +1,7 @@
 // Night grove hero scene: the IM30 cover's mushrooms under a violet sky.
-// A cluster of giant hot-pink trumpets glows over a forest of psychedelic caps; a mycelium network
-// under the moss carries the light between them, spreading out from the giant when the scene loads,
+// The mushrooms stand in a fairy ring under a saucer's tractor beam: the giant amanita, the IM30 trumpets,
+// psilocybes along the near edge. A mycelium network under the moss carries the light between them,
+// spreading out from under the saucer when the scene loads, chasing round the ring,
 // pulsing on the kick and following the pointer. Ringed planet, crescent moon, a saucer with a tractor beam.
 // Loaded lazily after first paint by MushroomScene.astro.
 import * as THREE from 'three';
@@ -18,10 +19,18 @@ const CYAN = new THREE.Color(0.05, 0.7, 1.0);
 const MAGENTA = new THREE.Color(1.0, 0.08, 0.6);
 const AMBER = new THREE.Color(1.0, 0.45, 0.08);
 
+// The fairy ring: the mushrooms fruit around its edge, where the mycelium underneath is spreading outward,
+// and the saucer hovers over the middle. Angles are in degrees from the camera's side (+z), clockwise from above.
+const RING = { x: 0, z: 0, r: 5.2 };
+function onRing(deg: number, dr = 0): [number, number] {
+  const a = THREE.MathUtils.degToRad(deg);
+  return [RING.x + (RING.r + dr) * Math.sin(a), RING.z + (RING.r + dr) * Math.cos(a)];
+}
+
 function groundH(x: number, z: number) {
   const base = 0.5 * fbm2(x * 0.3, z * 0.3) - 0.22;
-  // keep the clearing under the giant fairly level
-  const clearing = smooth(1.5, 5, Math.hypot(x, z - 0.6));
+  // the ring and its clearing are level; the moss rolls outside it
+  const clearing = smooth(RING.r + 0.5, RING.r + 4, Math.hypot(x - RING.x, z - RING.z));
   return lerp(-0.05, base, 0.35 + 0.65 * clearing);
 }
 
@@ -601,12 +610,19 @@ function makeMycena(count: number, avoid: { x: number; z: number; r: number }[])
 
   const base: THREE.Color[] = [];
   const where: THREE.Vector2[] = [];
+  const around: number[] = [];
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
   const pos = new THREE.Vector3(), scl = new THREE.Vector3(), top = new THREE.Vector3();
   let n = 0;
   // clusters, like real mycena growing out of the moss
   while (n < count) {
-    const cx = lerp(-5.5, 4.5, rand()), cz = lerp(-1.8, 5.2, rand());
+    let cx: number, cz: number;
+    if (rand() < 0.85) {
+      [cx, cz] = onRing(rand() * 360, (rand() - 0.5) * 0.6);
+    } else {
+      cx = lerp(-8, 8, rand()); cz = lerp(-6, 7, rand());
+      if (Math.hypot(cx - RING.x, cz - RING.z) < RING.r + 1) continue; // the clearing stays clear
+    }
     if (avoid.some((a) => Math.hypot(cx - a.x, cz - a.z) < a.r)) continue;
     const hue = rand();
     const c = hue > 0.82 ? AMBER : hue > 0.45 ? MAGENTA : CYAN;
@@ -633,6 +649,7 @@ function makeMycena(count: number, avoid: { x: number; z: number; r: number }[])
       const col = c.clone().offsetHSL((rand() - 0.5) * 0.05, 0, 0);
       base.push(col);
       where.push(new THREE.Vector2(x, z));
+      around.push(Math.atan2(x - RING.x, z - RING.z));
       caps.setColorAt(n, col);
       stems.setColorAt(n, col);
     }
@@ -641,7 +658,8 @@ function makeMycena(count: number, avoid: { x: number; z: number; r: number }[])
   function update(t: number, kick: number, spread: number, origin: THREE.Vector2) {
     for (let i = 0; i < count; i++) {
       const d = where[i].distanceTo(origin);
-      const rip = Math.pow(0.5 + 0.5 * Math.sin(d * 1.1 - t * 1.4), 3);
+      // three bright arcs chase each other around the ring
+      const rip = Math.pow(0.5 + 0.5 * Math.sin(around[i] * 3 - t * 0.45 + d * 0.15), 4);
       // dark until the infection reaches them, then a bright flash as it passes
       const lit = smooth(d, d + 1.5, spread), flash = Math.exp(-Math.pow((spread - d) * 0.9, 2));
       const k = (0.35 + 1.1 * rip + 0.25 * kick) * lit + 2.5 * flash;
@@ -910,11 +928,12 @@ function makeUfo() {
   group.scale.setScalar(SCALE);
   const tmp = new THREE.Color();
   function update(t: number) {
-    const x = -0.8 + 3.8 * Math.sin(t * 0.07), z = -7.5 + 2.2 * Math.cos(t * 0.07);
-    const y = 5.4 + 0.22 * Math.sin(t * 0.8);
+    // it hangs over the middle of the ring, drifting a little
+    const x = RING.x + 0.7 * Math.sin(t * 0.07), z = RING.z - 0.4 + 0.5 * Math.cos(t * 0.09);
+    const y = 5 + 0.22 * Math.sin(t * 0.8);
     group.position.set(x, y, z);
     craft.rotation.set(0.07 * Math.sin(t * 0.5), t * 0.5, 0.08 * Math.cos(t * 0.37 + 1) - 0.06 * Math.cos(t * 0.07));
-    const on = smooth(0.15, 0.55, Math.sin(t * 0.2 + 1));
+    const on = smooth(-0.55, 0.05, Math.sin(t * 0.13 - 0.3)); // the beam is down most of the time, and for the first ~20 s
     const ground = groundH(x, z);
     const len = (y - ground) / SCALE - 0.2;
     beam.scale.set(1, len, 1);
@@ -1041,7 +1060,8 @@ const MAX_SRC = 12;
 interface Infection {
   t: { value: number };
   kick: { value: number };
-  origin: { value: THREE.Vector2 }; // where the infection starts: the trumpets' foot, back and to the left
+  origin: { value: THREE.Vector2 }; // where the infection starts: the middle of the ring, under the saucer
+  wave: { value: THREE.Vector2 };   // where the slow pulse leaves from: the trumpets' foot, so it crosses at an angle
   spread: { value: number };       // how far from the origin the infection has reached
   ptr: { value: THREE.Vector3 };   // the pointer on the ground: x, z, strength
   src: { value: THREE.Vector4[] };
@@ -1065,13 +1085,13 @@ function makeGround(inf: Infection) {
   g.computeVertexNormals();
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
   mat.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, { uT: inf.t, uKick: inf.kick, uSpread: inf.spread, uPtr: inf.ptr, uSrc: inf.src, uOrigin: inf.origin });
+    Object.assign(sh.uniforms, { uT: inf.t, uKick: inf.kick, uSpread: inf.spread, uPtr: inf.ptr, uSrc: inf.src, uOrigin: inf.origin, uWave: inf.wave, uRing: { value: new THREE.Vector3(RING.x, RING.z, RING.r) } });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWp;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWp = (modelMatrix * vec4(transformed, 1.)).xyz;');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-        uniform float uT, uKick, uSpread; uniform vec2 uOrigin; uniform vec3 uPtr; uniform vec4 uSrc[${MAX_SRC}];
+        uniform float uT, uKick, uSpread; uniform vec2 uOrigin, uWave; uniform vec3 uPtr, uRing; uniform vec4 uSrc[${MAX_SRC}];
         varying vec3 vWp;
         ${NOISE_GLSL}
         vec2 h22(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * vec3(.1031, .103, .0973)); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.xx + p3.yz) * p3.zy); }
@@ -1099,24 +1119,35 @@ function makeGround(inf: Infection) {
             float e2 = web(qw * 2.6 + 4.1), a2 = fwidth(e2);
             hypha = (1. - smoothstep(0., .03 + a2, e2)) * smoothstep(.4, .1, a2) * .5;
           }
-          float net = max(strand, hypha) * (.3 + .7 * smoothstep(.3, .7, n2(q * .5 + 3.)));
+          // the fairy ring: the mycelium is densest along its edge, and three comets chase each other round it
+          vec2 rv = q - uRing.xy;
+          float band = exp(-pow((length(rv) - uRing.z) / .9, 2.));
+          float chase = pow(fract(atan(rv.x, rv.y) * ${(3 / (2 * Math.PI)).toFixed(4)} - uT * .075), 5.);
+          float net = max(strand, hypha) * (.3 + .7 * max(band, smoothstep(.3, .7, n2(q * .5 + 3.))));
           // energy pools around the mushrooms' feet
           float feed = 0.;
           for (int k = 0; k < ${MAX_SRC}; k++) { vec2 dv = q - uSrc[k].xy; feed += uSrc[k].w * exp(-dot(dv, dv) / (uSrc[k].z * uSrc[k].z)); }
-          float d0 = length(q - uOrigin);
+          float fray = (n2(q * .22 + 5.) - .5) * 4.;
+          float d0 = length(q - uWave);
           // a slow pulse leaves the trumpets every four beats and washes diagonally across the grove,
           // its front bent and frayed by the moss
-          float dw = d0 + (n2(q * .22 + 5.) - .5) * 4.;
+          float dw = d0 + fray;
           float wph = fract(uT * ${(BPM / 240).toFixed(4)} - dw * .09);
           float ring = smoothstep(.55, .95, wph) * smoothstep(1., .96, wph) * exp(-d0 * .04);
-          // the infection spreading out when the scene loads: dark ahead of it, a bright front
-          float lit = smoothstep(uSpread + .5, uSpread - 1.5, dw);
-          float front = exp(-pow((dw - uSpread) * .7, 2.));
+          ring += band * (.4 + 1.3 * chase);
+          // the infection spreading out from under the saucer when the scene loads: dark ahead of it, a bright front
+          float ds = length(q - uOrigin) + fray;
+          float lit = smoothstep(uSpread + .5, uSpread - 1.5, ds);
+          float front = exp(-pow((ds - uSpread) * .7, 2.));
           vec2 pv = q - uPtr.xy;
           float touch = uPtr.z * exp(-dot(pv, pv) * .28);
           vec3 tint = mix(vec3(.05, .75, 1.), vec3(1., .12, .62), smoothstep(.4, .65, n2(q * .12 + 11.)));
-          float energy = (.1 + feed * (1. + .3 * uKick) + 1.8 * ring) * lit + 3. * front + 4. * touch;
+          // inside the ring the moss is spent and dark, so the ring itself stands out
+          float inside = smoothstep(uRing.z - .7, uRing.z - 2.2, length(rv));
+          float energy = ((.1 + feed * (1. + .3 * uKick) + 1.8 * ring) * (1. - .8 * inside) + .8 * band) * lit + 3. * front + 4. * touch;
           totalEmissiveRadiance += tint * (net * energy + feed * lit * .04 + touch * .1 + front * .08);
+          // and a soft glow on the moss along the ring, brightest where the comets pass
+          totalEmissiveRadiance += mix(vec3(.05, .75, 1.), vec3(1., .12, .62), .5 + .5 * sin(atan(rv.x, rv.y) * 2. + uT * .1)) * band * lit * (.12 + .45 * chase);
         }`);
   };
   return new THREE.Mesh(g, mat);
@@ -1271,7 +1302,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   scene.add(rimLight);
 
   const inf: Infection = {
-    t: { value: 0 }, kick: { value: 0 }, spread: { value: 0 }, origin: { value: new THREE.Vector2() },
+    t: { value: 0 }, kick: { value: 0 }, spread: { value: 0 }, origin: { value: new THREE.Vector2() }, wave: { value: new THREE.Vector2() },
     ptr: { value: new THREE.Vector3(0, 0, 0) },
     src: { value: Array.from({ length: MAX_SRC }, () => new THREE.Vector4(0, 0, 1, 0)) },
   };
@@ -1288,17 +1319,19 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   };
 
   const pulse = { value: 1 };
-  // the trumpet cluster's foot; the infection starts here, so its waves cross the view at an angle
-  const TX = -4.1, TZ = -4.2;
-  inf.origin.value.set(TX, TZ);
-  const fromOrigin = (x: number, z: number) => Math.hypot(x - TX, z - TZ);
+  // the infection starts under the saucer and reaches the whole ring at once; the slow pulse leaves from the trumpets
+  inf.origin.value.set(RING.x, RING.z);
+  const fromOrigin = (x: number, z: number) => Math.hypot(x - RING.x, z - RING.z);
+  const [TX, TZ] = onRing(222, 0.3);
+  inf.wave.value.set(TX, TZ);
 
-  /* the giant amanita: sculpted cap, raised warts, a hanging skirt, glowing gill plates */
+  /* the amanitas: the giant stands on the ring's right, its kin further round */
+  const ringAt = (deg: number, dr = 0) => { const [x, z] = onRing(deg, dr); return { x, z }; };
   const amanitaDefs: (ShroomOpts & { x: number; y: number; z: number; s: number })[] = [
-    { x: 0, y: -0.1, z: 0, s: 1, h: 3, r: 2, bend: 0.12, seed: 1, cap: 0x5c0a55, glow: CYAN.clone().multiplyScalar(0.5), detail: 1 },
-    { x: 2.9, y: -0.1, z: -1.9, s: 0.8, h: 3.1, r: 1.4, bend: 0.3, seed: 3, cap: 0x6c1a8f, glow: MAGENTA.clone().multiplyScalar(0.4), detail: 0.7 },
-    { x: -3.6, y: -0.05, z: 1.2, s: 0.5, h: 2.4, r: 1.6, bend: -0.28, seed: 2, cap: 0x4a1f9e, glow: CYAN.clone().multiplyScalar(0.4), detail: 0.6 },
-    { x: 2.1, y: -0.05, z: 2.3, s: 0.3, h: 2, r: 1.7, bend: 0.1, seed: 4, cap: 0x9a2170, glow: CYAN.clone().multiplyScalar(0.4), detail: 0.45 },
+    { ...ringAt(126), y: -0.1, s: 1, h: 3, r: 2, bend: 0.12, seed: 1, cap: 0x5c0a55, glow: CYAN.clone().multiplyScalar(0.5), detail: 1 },
+    { ...ringAt(150, 0.4), y: -0.1, s: 0.8, h: 3.1, r: 1.4, bend: 0.3, seed: 3, cap: 0x6c1a8f, glow: MAGENTA.clone().multiplyScalar(0.4), detail: 0.7 },
+    { ...ringAt(-112), y: -0.05, s: 0.5, h: 2.4, r: 1.6, bend: -0.28, seed: 2, cap: 0x4a1f9e, glow: CYAN.clone().multiplyScalar(0.4), detail: 0.6 },
+    { ...ringAt(-58), y: -0.05, s: 0.3, h: 2, r: 1.7, bend: 0.1, seed: 4, cap: 0x9a2170, glow: CYAN.clone().multiplyScalar(0.4), detail: 0.45 },
     { x: -9, y: -0.3, z: -14, s: 1.1, h: 3, r: 1.8, bend: 0.22, seed: 6, cap: 0x3a1a6e, glow: CYAN.clone().multiplyScalar(0.3), detail: 0.15 },
     { x: 14, y: -0.4, z: -20, s: 1.4, h: 2.6, r: 2.1, bend: -0.3, seed: 7, cap: 0x4d1a70, glow: MAGENTA.clone().multiplyScalar(0.3), detail: 0.12 },
   ];
@@ -1315,7 +1348,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     return { m, x: d.x, z: d.z, d: fromOrigin(d.x, d.z) };
   });
 
-  /* the IM30 trumpets: a towering cluster sprouting from one foot behind the giant, leaning apart */
+  /* the IM30 trumpets: a towering cluster on the far side of the ring, leaning apart */
   const trumpetDefs = [
     { x: TX, z: TZ, L: 3.1, s: 1.15, bend: 0.35, tilt: 0.05, dir: 0.4, seed: 11, detail: 1 },
     { x: TX + 1.1, z: TZ - 0.6, L: 2.1, s: 0.92, bend: 0.5, tilt: 0.14, dir: -0.3, seed: 12, detail: 0.85 },
@@ -1336,17 +1369,18 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     return { m, x: d.x, z: d.z, d: fromOrigin(d.x, d.z) };
   });
 
-  /* the forest: the IM30 grove's caps, receding into the haze */
+  /* the forest: the IM30 grove's caps close the ring, then recede into the haze */
   const G = (r: number, g: number, b: number) => new THREE.Color(r, g, b);
   const forestDefs: { x: number; z: number; s: number; kind: CapKind; cap: number; gill: THREE.Color; young?: number; detail?: number }[] = [
-    { x: -6.2, z: -2.5, s: 0.85, kind: 'liberty', cap: 0x6a3aa0, gill: G(0.2, 0.9, 1), young: 2, detail: 0.7 },
-    { x: 5.4, z: -3.5, s: 0.8, kind: 'parasol', cap: 0x8a2a6a, gill: G(0.2, 0.8, 1.1), young: 1, detail: 0.7 },
-    { x: -2.9, z: 3.1, s: 0.3, kind: 'wavy', cap: 0x8a1a8a, gill: G(0.1, 0.8, 1.1), detail: 0.6 },
-    { x: 3.4, z: 1.2, s: 0.32, kind: 'funnel', cap: 0x1a4aa0, gill: G(0.2, 1, 0.9), detail: 0.6 },
+    { ...ringAt(166), s: 0.7, kind: 'liberty', cap: 0x6a3aa0, gill: G(0.2, 0.9, 1), young: 2, detail: 0.7 },
+    { ...ringAt(-146), s: 0.8, kind: 'parasol', cap: 0x8a2a6a, gill: G(0.2, 0.8, 1.1), young: 1, detail: 0.7 },
+    { ...ringAt(-84), s: 0.34, kind: 'wavy', cap: 0x8a1a8a, gill: G(0.1, 0.8, 1.1), young: 1, detail: 0.6 },
+    { ...ringAt(-28), s: 0.3, kind: 'funnel', cap: 0x1a4aa0, gill: G(0.2, 1, 0.9), detail: 0.6 },
+    { ...ringAt(122, 0.2), s: 0.32, kind: 'funnel', cap: 0x1a4aa0, gill: G(0.2, 1, 0.9), detail: 0.6 },
     { x: -9.5, z: -7, s: 1.2, kind: 'wavy', cap: 0x8a1a8a, gill: G(0.1, 0.8, 1.1), young: 2 },
-    { x: 1.5, z: -9, s: 1.0, kind: 'funnel', cap: 0xb0206a, gill: G(0.2, 1, 1), young: 1 },
-    { x: 7.5, z: -8, s: 1.3, kind: 'wavy', cap: 0x3a1a9a, gill: G(1, 0.35, 0.85), young: 1 },
-    { x: -4.5, z: -11, s: 1.5, kind: 'liberty', cap: 0x7a2a9a, gill: G(1, 0.4, 0.9), young: 1 },
+    { x: 1.5, z: -11, s: 1.0, kind: 'funnel', cap: 0xb0206a, gill: G(0.2, 1, 1), young: 1 },
+    { x: -8, z: -5.5, s: 1.3, kind: 'wavy', cap: 0x3a1a9a, gill: G(1, 0.35, 0.85), young: 1 },
+    { x: -4.5, z: -12, s: 1.5, kind: 'liberty', cap: 0x7a2a9a, gill: G(1, 0.4, 0.9), young: 1 },
     { x: 11, z: -12, s: 1.7, kind: 'parasol', cap: 0x5a1a8a, gill: G(0.2, 0.9, 1) },
     { x: -15, z: -12, s: 1.8, kind: 'parasol', cap: 0x8a2a6a, gill: G(0.2, 0.8, 1.1), detail: 0.35 },
     { x: 4, z: -17, s: 1.9, kind: 'liberty', cap: 0x6a3aa0, gill: G(0.2, 0.9, 1), detail: 0.35 },
@@ -1365,60 +1399,63 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     };
     const detail = d.detail ?? 0.5;
     add(makeForestShroom(d.kind, 300 + i, d.cap, d.gill, detail), d.x, d.z, d.s);
-    // young ones clustered at its foot
+    // young ones clustered at its foot, along the ring when it's on it
     const kinds: CapKind[] = ['liberty', 'wavy', 'funnel', 'parasol'];
+    const tangent = Math.atan2(d.z - RING.z, -(d.x - RING.x));
+    const onIt = Math.abs(fromOrigin(d.x, d.z) - RING.r) < 0.5;
     for (let k = 0; k < (d.young ?? 0); k++) {
-      const a = rand() * Math.PI * 2, dist = d.s * lerp(0.8, 1.4, rand());
+      const a = onIt ? tangent + (k % 2 ? Math.PI : 0) + (rand() - 0.5) * 0.5 : rand() * Math.PI * 2;
+      const dist = Math.max(d.s, 0.5) * lerp(0.8, 1.4, rand());
       add(makeForestShroom(kinds[Math.floor(rand() * kinds.length)], 400 + i * 5 + k, d.cap, d.gill, detail * 0.6),
-        d.x + Math.cos(a) * dist, d.z + Math.sin(a) * dist, d.s * lerp(0.28, 0.45, rand()));
+        d.x + Math.cos(a) * dist, d.z - Math.sin(a) * dist, d.s * lerp(0.28, 0.45, rand()));
     }
   });
 
-  /* little purple mushrooms with red warts, huddled at the trumpets' foot and the giant's */
+  /* little purple mushrooms with red warts, in twos and threes around the ring */
   const minis: Placed<THREE.Group>[] = [];
   [
-    { x: TX - 1.4, z: TZ + 1.4, s: 0.3 }, { x: TX - 1.0, z: TZ + 1.8, s: 0.22 }, { x: TX - 1.8, z: TZ + 1.7, s: 0.17 },
-    { x: TX + 1.6, z: TZ + 1.0, s: 0.24 }, { x: -1.9, z: 1.6, s: 0.2 }, { x: -1.5, z: 2.0, s: 0.15 },
-    { x: 1.6, z: 1.7, s: 0.18 },
-  ].forEach((d, i) => {
+    [-150, 0.9, 0.3], [-156, 1.2, 0.2], [-140, 1.1, 0.16], [178, 0.3, 0.24], [-8, 0.1, 0.2], [-2, -0.2, 0.15],
+    [60, 0.2, 0.18], [66, -0.1, 0.13], [-100, 0.2, 0.2], [-40, -0.1, 0.17], [130, -0.3, 0.2],
+  ].forEach(([deg, dr, s], i) => {
+    const [x, z] = onRing(deg, dr);
     const m = makeMushroom({
       h: 1.1, r: 1.25, bend: i % 2 ? 0.1 : -0.1, seed: 80 + i, cap: 0x7a3cc0,
       glow: CYAN.clone().multiplyScalar(0.9), detail: 0.5, wart: 0xff2a3c,
     }, pulse);
-    m.scale.setScalar(d.s);
-    m.position.set(d.x, groundH(d.x, d.z) - 0.02, d.z);
+    m.scale.setScalar(s);
+    m.position.set(x, groundH(x, z) - 0.02, z);
     m.rotation.y = i * 1.9;
     scene.add(m);
-    minis.push({ m, x: d.x, z: d.z, d: fromOrigin(d.x, d.z) });
+    minis.push({ m, x, z, d: fromOrigin(x, z) });
   });
 
   // the mycelium pools under the giant, the trumpets and the bigger mushrooms nearby
   const feet = [
-    { x: 0, z: 0.1, r: 2.2, w: 0.9 },
+    { x: amanitas[0].x, z: amanitas[0].z, r: 2.2, w: 0.9 },
     { x: TX, z: TZ, r: 2, w: 0.8 },
     ...amanitas.slice(1, 4).map((f) => ({ x: f.x, z: f.z, r: 1.2 * f.m.scale.x + 0.3, w: 0.5 })),
-    ...forest.filter((f) => f.d < 14 && f.m.scale.x > 0.7).map((f) => ({ x: f.x, z: f.z, r: 0.9 * f.m.scale.x, w: 0.4 })),
+    ...forest.filter((f) => f.d < 14 && f.m.scale.x > 0.6).map((f) => ({ x: f.x, z: f.z, r: 0.9 * f.m.scale.x, w: 0.4 })),
   ].slice(0, MAX_SRC);
   feet.forEach((f, i) => inf.src.value[i].set(f.x, f.z, f.r, f.w));
 
   // the giant's gills and the trumpets' funnels light the grove
   const gillLight = new THREE.PointLight(CYAN, 4, 12, 2);
-  gillLight.position.set(0.9, 1.4, 1.2);
+  gillLight.position.set(amanitas[0].x - 0.9, 1.4, amanitas[0].z + 1.2);
   scene.add(gillLight);
   const magentaLight = new THREE.PointLight(MAGENTA, 2.5, 8, 2);
-  magentaLight.position.set(2.9, 1.7, -1.9);
+  magentaLight.position.set(amanitas[1].x, 1.7, amanitas[1].z);
   scene.add(magentaLight);
   const trumpetLight = new THREE.PointLight(new THREE.Color(0.1, 0.55, 1), 4, 11, 2);
   trumpetLight.position.set(TX + 0.3, 3.2, TZ + 1.2);
   scene.add(trumpetLight);
 
-  /* Psilocybe under the giant: a cubensis clump left of its stem, cyanescens to the right, a troop of liberty caps.
-     On portrait screens that ground is behind the title, so they move up close to the lens instead. */
+  /* Psilocybe along the near edge of the ring: cubensis and a troop of liberty caps by the giant, cyanescens across.
+     On portrait screens they come up close to the lens instead. */
   const psiloDefs: { sp: Species; seed: number; n: number; s: number; ps: number; land: [number, number]; port: [number, number]; ry: number }[] = [
-    { sp: 'cubensis', seed: 21, n: 6, s: 0.42, ps: 0.48, land: [-0.55, 3.5], port: [-0.75, 10.3], ry: 0.6 },
-    { sp: 'cyanescens', seed: 5, n: 8, s: 0.3, ps: 0.36, land: [0.75, 2.9], port: [0.8, 9.4], ry: -0.4 },
+    { sp: 'cubensis', seed: 21, n: 6, s: 0.42, ps: 0.55, land: onRing(30, 0.1), port: onRing(12, 0.3), ry: 0.6 },
+    { sp: 'cyanescens', seed: 5, n: 8, s: 0.3, ps: 0.4, land: onRing(6, 0.1), port: onRing(-12, 0.3), ry: -0.4 },
     // liberty caps don't clump: a loose troop scattered through the moss
-    { sp: 'semilanceata', seed: 33, n: 9, s: 0.26, ps: 0.14, land: [1.5, 1.3], port: [0.15, 11.6], ry: 0.3 },
+    { sp: 'semilanceata', seed: 33, n: 9, s: 0.26, ps: 0.26, land: onRing(44, 0.5), port: onRing(32, 0.3), ry: 0.3 },
   ];
   const psilos = psiloDefs.map((d) => {
     const c = makePsilocybeCluster(d.sp, d.seed, d.n, 0.9);
@@ -1434,25 +1471,26 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
       sh.scale.setScalar(k * 3);
       c.group.position.set(x, groundH(x, z) - 0.02, z);
       sh.position.set(x, groundH(x, z) + 0.03, z);
-      // they're what a visitor sees first on a phone, so the infection reaches them early wherever they stand
-      c.members.forEach((m) => (m.userData.d = Math.min(fromOrigin(x, z), 6)));
+      c.members.forEach((m) => (m.userData.d = fromOrigin(x, z)));
     };
     place(false);
     return { ...c, place };
   });
 
-  const mycena = makeMycena(240, [
+  const mycena = makeMycena(320, [
     ...amanitaDefs.slice(0, 4).map((d) => ({ x: d.x, z: d.z, r: 0.25 * d.r * d.s + 0.35 })),
     ...trumpetDefs.map((d) => ({ x: d.x, z: d.z, r: 0.5 * d.s + 0.3 })),
-    ...psiloDefs.flatMap((d) => [d.land, d.port].map(([x, z]) => ({ x, z, r: 0.35 }))),
+    ...psiloDefs.flatMap((d) => [d.land, d.port].map(([x, z]) => ({ x, z, r: 0.45 }))),
     ...forest.filter((f) => f.d < 8).map((f) => ({ x: f.x, z: f.z, r: 0.3 * f.m.scale.x + 0.3 })),
   ]);
   scene.add(mycena.group);
 
+  // two figures at the ring's edge, looking up at the saucer
   const f1 = figure(0.62), f2 = figure(0.5);
-  f1.position.set(-1.35, groundH(-1.35, 2.3), 2.3);
-  f2.position.set(-0.95, groundH(-0.95, 2.55), 2.55);
-  f1.rotation.y = 0.3; f2.rotation.y = -0.2;
+  const [f1x, f1z] = onRing(12, 1.3), [f2x, f2z] = onRing(17, 1.45);
+  f1.position.set(f1x, groundH(f1x, f1z), f1z);
+  f2.position.set(f2x, groundH(f2x, f2z), f2z);
+  f1.rotation.y = Math.atan2(RING.x - f1x, RING.z - f1z) + Math.PI; f2.rotation.y = Math.atan2(RING.x - f2x, RING.z - f2z) + Math.PI;
   scene.add(f1, f2);
 
   const spores = makeSpores(260, new THREE.Vector3(18, 7, 12), new THREE.Vector3(-1, -0.2, 0), 7, 0.25);
@@ -1466,27 +1504,32 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
 
   // a big crescent moon, lit from behind and to the right
   const MOON_DIR = new THREE.Vector3();
-  const moonRel = new THREE.Vector3(); // relative to where the camera is heading
   const sun = new THREE.Vector3();
   const Y = new THREE.Vector3(0, 1, 0);
   const moon = makeMoon(sun);
   const MOON_DIST = 200, MOON_R = MOON_DIST * Math.tan(THREE.MathUtils.degToRad(4));
+  let shift = -3, dist = 13, portrait = false, camY = 1.9, tgtY = 2.6;
+  // the planet and the moon keep their places on screen however the camera is tilted (NDC, -1..1)
+  const planetAt = new THREE.Vector2(), moonAt = new THREE.Vector2();
   function placeMoon(portrait: boolean) {
-    // landscape: the clear sky between the planet and the giant; portrait: above the giant
-    moonRel.set(portrait ? 0.105 : 0.15, portrait ? 0.36 : 0.3, -1).normalize();
+    if (portrait) { planetAt.set(-0.66, 0.68); moonAt.set(0.54, 0.77); }
+    else { planetAt.set(-0.3, 0.74); moonAt.set(0.78, 0.68); }
+    if (debug.planetAt) planetAt.fromArray(debug.planetAt);
+    if (debug.moonAt) moonAt.fromArray(debug.moonAt);
   }
-  let shift = -3, dist = 13, portrait = false;
-  const planetRel = new THREE.Vector3(-0.13, 0.32, -1).normalize();
-  function aimMoon(yaw: number) {
-    MOON_DIR.copy(moonRel).applyAxisAngle(Y, -yaw);
-    const pl = (sky.material as THREE.ShaderMaterial).uniforms.uPL.value as THREE.Vector3;
-    if (portrait) pl.copy(planetRel).applyAxisAngle(Y, -yaw); else pl.copy(PLANET);
+  const skyDir = (at: THREE.Vector2, out: THREE.Vector3) => {
+    const th = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    return out.set(at.x * th * camera.aspect, at.y * th, -1).normalize().applyQuaternion(camera.quaternion);
+  };
+  function aimMoon() {
+    skyDir(moonAt, MOON_DIR);
+    skyDir(planetAt, (sky.material as THREE.ShaderMaterial).uniforms.uPL.value as THREE.Vector3);
     // light from the viewer's right and slightly behind the moon: the same fat crescent in either layout
     const right = new THREE.Vector3(-MOON_DIR.z, 0, MOON_DIR.x).normalize();
     sun.copy(right).multiplyScalar(0.85).add(new THREE.Vector3(0, 0.25, 0)).addScaledVector(MOON_DIR, 0.35).normalize();
   }
   placeMoon(false);
-  aimMoon(0);
+  aimMoon();
   moon.moon.scale.setScalar(MOON_R);
   moon.halo.scale.setScalar(MOON_R * 5);
   moon.moon.rotation.set(0.4, 0.8, 0.2);
@@ -1531,10 +1574,14 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     if (!w || !h) return;
     portrait = h > w;
     camera.aspect = w / h;
-    camera.fov = portrait ? 46 : 31;
+    camera.fov = portrait ? 46 : 40;
     camera.updateProjectionMatrix();
-    shift = portrait ? -1.0 : -Math.min(2.9, 1.6 * (w / h));
-    dist = portrait ? 16 : 11;
+    // standing at the ring's near edge, a little above it so it reads as a circle on the ground
+    // (portrait: further back, so the trumpets and the giant frame the beam from either edge)
+    shift = portrait ? 0 : -Math.max(2.2, 3.7 - 0.9 * (w / h)); // on squarer screens the title reaches further right
+    dist = portrait ? 21 : 12.5;
+    camY = portrait ? 3.2 : 3.6; tgtY = portrait ? 2.2 : 1.9;
+    if (debug.view) { ({ shift = shift, dist = dist, camY = camY, tgtY = tgtY } = debug.view); camera.fov = debug.view.fov ?? camera.fov; camera.updateProjectionMatrix(); }
     placeMoon(portrait);
     psilos.forEach((c) => c.place(portrait));
     renderer.setPixelRatio(pr);
@@ -1587,14 +1634,14 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
 
     // a slow orbit; on portrait screens it's small, so the clumps close to the lens stay in frame
     const ct = calmOnly ? 0 : t;
-    const ang = (portrait ? 0.05 : 0.2) * Math.sin(ct * 0.06) + mx * (portrait ? 0.05 : 0.2);
-    camera.position.set(Math.sin(ang) * dist, (portrait ? 1.4 : 1.9) + my * 0.4 + 0.15 * Math.sin(ct * 0.08), Math.cos(ang) * dist);
-    target.set(shift, (portrait ? 2.0 : 2.6) + my * 0.2 + 0.1 * Math.sin(ct * 0.11), 0);
+    const ang = (portrait ? 0.05 : 0.15) * Math.sin(ct * 0.06) + mx * (portrait ? 0.05 : 0.2);
+    camera.position.set(RING.x + Math.sin(ang) * dist, camY + my * 0.4 + 0.15 * Math.sin(ct * 0.08), RING.z + Math.cos(ang) * dist);
+    target.set(RING.x + shift, tgtY + my * 0.2 + 0.1 * Math.sin(ct * 0.11), RING.z);
     if (debug.cam) { camera.position.fromArray(debug.cam[0]); target.fromArray(debug.cam[1]); }
     camera.lookAt(target);
     camera.updateMatrixWorld();
     sky.position.copy(camera.position);
-    aimMoon(Math.atan2(target.x - camera.position.x, camera.position.z - target.z));
+    aimMoon();
     moon.group.position.copy(camera.position).addScaledVector(MOON_DIR, MOON_DIST);
     moon.moon.rotation.y = 0.8 + t * 0.004;
     (sky.material as THREE.ShaderMaterial).uniforms.uT.value = t;
@@ -1654,7 +1701,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     });
     gillLight.intensity = (3.5 + 2.5 * kick) * Math.min(litOf(amanitas[0].d), 1.5);
     magentaLight.intensity = 2.5 * Math.min(litOf(amanitas[1].d), 1.5);
-    trumpetLight.intensity = (3.5 + 2 * kick) * Math.min(litOf(0), 1.5);
+    trumpetLight.intensity = (3.5 + 2 * kick) * Math.min(litOf(trumpets[0].d), 1.5);
     mycena.update(t, kick, spread, inf.origin.value);
     ufo.update(t);
     for (const p of [spores, moss]) (p.material as THREE.ShaderMaterial).uniforms.uT.value = t;
