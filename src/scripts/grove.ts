@@ -916,10 +916,14 @@ function makeUfo() {
   ripple.rotation.x = -Math.PI / 2;
   group.add(ripple);
 
-  const spot = new THREE.SpotLight(CYAN, 0, 16, 0.24, 0.8, 1.5);
+  // the beam lights what stands in it: a spot as wide as the beam's cone
+  const spot = new THREE.SpotLight(new THREE.Color(0.3, 0.85, 1), 0, 16, 0.46, 0.55, 1.5);
   spot.position.set(0, -0.2, 0);
   spot.target.position.set(0, -10, 0);
   group.add(spot, spot.target);
+  // and the light it scatters reaches the ring around it, catching the sides of the caps that face it
+  const scatter = new THREE.PointLight(new THREE.Color(0.25, 0.8, 1), 0, 13, 1.2);
+  group.add(scatter);
   const underGlow = new THREE.PointLight(CYAN, 2, 3, 2);
   underGlow.position.y = -0.5;
   craft.add(underGlow);
@@ -930,7 +934,7 @@ function makeUfo() {
   function update(t: number) {
     // it hangs over the middle of the ring, drifting a little
     const x = RING.x + 0.7 * Math.sin(t * 0.07), z = RING.z - 0.4 + 0.5 * Math.cos(t * 0.09);
-    const y = 5 + 0.22 * Math.sin(t * 0.8);
+    const y = 6.2 + 0.22 * Math.sin(t * 0.8);
     group.position.set(x, y, z);
     craft.rotation.set(0.07 * Math.sin(t * 0.5), t * 0.5, 0.08 * Math.cos(t * 0.37 + 1) - 0.06 * Math.cos(t * 0.07));
     const on = smooth(-0.55, 0.05, Math.sin(t * 0.13 - 0.3)); // the beam is down most of the time, and for the first ~20 s
@@ -943,7 +947,10 @@ function makeUfo() {
     moteMat.uniforms.uLen.value = 1; // motes live in beam space (already scaled by len)
     ripple.position.y = (ground + 0.04 - y) / SCALE;
     ripple.visible = on > 0.01;
-    spot.intensity = on * 90;
+    spot.intensity = on * 40;
+    // low in the beam, flickering with its bands
+    scatter.position.y = (ground + 2.8 - y) / SCALE;
+    scatter.intensity = on * (30 + 5 * Math.sin(t * 9) * Math.sin(t * 2.3));
     coreMat.uniforms.uT.value = t;
     underGlow.intensity = 0.8 + 1.2 * on;
     (beacon.material as THREE.MeshBasicMaterial).color.setRGB(1, 0.1, 0.25).multiplyScalar(Math.sin(t * 6) > 0.6 ? 2.2 : 0.15);
@@ -1147,7 +1154,12 @@ function makeGround(inf: Infection) {
           float energy = ((.1 + feed * (1. + .3 * uKick) + 1.8 * ring) * (1. - .8 * inside) + .8 * band) * lit + 3. * front + 4. * touch;
           totalEmissiveRadiance += tint * (net * energy + feed * lit * .04 + touch * .1 + front * .08);
           // and a soft glow on the moss along the ring, brightest where the comets pass
-          totalEmissiveRadiance += mix(vec3(.05, .75, 1.), vec3(1., .12, .62), .5 + .5 * sin(atan(rv.x, rv.y) * 2. + uT * .1)) * band * lit * (.12 + .45 * chase);
+          // and a bright line of dense hyphae right on the ring, wavering a little, so its shape reads from afar
+          float rl = length(rv) - uRing.z + (n2(q * .8 + 2.) - .5) * .35;
+          float aw = fwidth(rl);
+          float line = exp(-pow(rl / (.11 + aw), 2.)) * mix(1., .5, smoothstep(.1, .5, aw));
+          vec3 rc = mix(vec3(.05, .75, 1.), vec3(1., .12, .62), .5 + .5 * sin(atan(rv.x, rv.y) * 2. + uT * .1));
+          totalEmissiveRadiance += rc * lit * (band * (.15 + .45 * chase) + line * (1.1 + 2.2 * chase));
         }`);
   };
   return new THREE.Mesh(g, mat);
@@ -1449,16 +1461,22 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   trumpetLight.position.set(TX + 0.3, 3.2, TZ + 1.2);
   scene.add(trumpetLight);
 
-  /* Psilocybe along the near edge of the ring: cubensis and a troop of liberty caps by the giant, cyanescens across.
-     On portrait screens they come up close to the lens instead. */
-  const psiloDefs: { sp: Species; seed: number; n: number; s: number; ps: number; land: [number, number]; port: [number, number]; ry: number }[] = [
-    { sp: 'cubensis', seed: 21, n: 6, s: 0.42, ps: 0.55, land: onRing(30, 0.1), port: onRing(12, 0.3), ry: 0.6 },
-    { sp: 'cyanescens', seed: 5, n: 8, s: 0.3, ps: 0.4, land: onRing(6, 0.1), port: onRing(-12, 0.3), ry: -0.4 },
+  /* Psilocybe along the near edge of the ring, and in the clearing inside it: a cubensis clump right under the beam,
+     the others around it. On portrait screens the edge clumps shift so they stay in frame. */
+  const psiloDefs: { sp: Species; seed: number; n: number; s: number; ps: number; land: [number, number]; port: [number, number]; ry: number; detail?: number }[] = [
+    { sp: 'cubensis', seed: 21, n: 6, s: 0.42, ps: 0.55, land: onRing(30, 0.1), port: onRing(12, 0.3), ry: 0.6, detail: 0.6 },
+    { sp: 'cyanescens', seed: 5, n: 8, s: 0.3, ps: 0.4, land: onRing(6, 0.1), port: onRing(-12, 0.3), ry: -0.4, detail: 0.6 },
     // liberty caps don't clump: a loose troop scattered through the moss
-    { sp: 'semilanceata', seed: 33, n: 9, s: 0.26, ps: 0.26, land: onRing(44, 0.5), port: onRing(32, 0.3), ry: 0.3 },
+    { sp: 'semilanceata', seed: 33, n: 9, s: 0.26, ps: 0.26, land: onRing(44, 0.5), port: onRing(32, 0.3), ry: 0.3, detail: 0.6 },
+    // the clearing
+    { sp: 'cubensis', seed: 47, n: 8, s: 0.5, ps: 0.55, land: [0.95, 0.55], port: [0.8, 0.6], ry: 1.9, detail: 0.7 },
+    { sp: 'cyanescens', seed: 58, n: 7, s: 0.34, ps: 0.38, land: [-2.2, 1.1], port: [-1.8, 1.3], ry: 0.8, detail: 0.45 },
+    { sp: 'semilanceata', seed: 61, n: 10, s: 0.3, ps: 0.3, land: [2.0, 1.6], port: [1.7, 1.6], ry: -0.5, detail: 0.45 },
+    { sp: 'cubensis', seed: 73, n: 5, s: 0.32, ps: 0.34, land: [-1.2, -2.5], port: [-1.2, -2.5], ry: 2.6, detail: 0.45 },
+    { sp: 'cyanescens', seed: 84, n: 6, s: 0.3, ps: 0.32, land: [2.4, -2.1], port: [2.2, -2.1], ry: -1.2, detail: 0.45 },
   ];
   const psilos = psiloDefs.map((d) => {
-    const c = makePsilocybeCluster(d.sp, d.seed, d.n, 0.9);
+    const c = makePsilocybeCluster(d.sp, d.seed, d.n, d.detail!);
     c.group.rotation.y = d.ry;
     scene.add(c.group);
     const sh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), shadowMat);
@@ -1511,9 +1529,10 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
   let shift = -3, dist = 13, portrait = false, camY = 1.9, tgtY = 2.6;
   // the planet and the moon keep their places on screen however the camera is tilted (NDC, -1..1)
   const planetAt = new THREE.Vector2(), moonAt = new THREE.Vector2();
-  function placeMoon(portrait: boolean) {
-    if (portrait) { planetAt.set(-0.66, 0.68); moonAt.set(0.54, 0.77); }
-    else { planetAt.set(-0.3, 0.74); moonAt.set(0.78, 0.68); }
+  function placeMoon(portrait: boolean, aspect: number) {
+    if (portrait) { planetAt.set(-0.66, 0.72); moonAt.set(0.7, 0.84); }
+    // on squarer screens the saucer comes further right, so the moon moves over toward the middle
+    else { planetAt.set(-0.3, 0.74); moonAt.set(aspect < 1.5 ? 0.24 : 0.78, aspect < 1.5 ? 0.8 : 0.68); }
     if (debug.planetAt) planetAt.fromArray(debug.planetAt);
     if (debug.moonAt) moonAt.fromArray(debug.moonAt);
   }
@@ -1528,7 +1547,7 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     const right = new THREE.Vector3(-MOON_DIR.z, 0, MOON_DIR.x).normalize();
     sun.copy(right).multiplyScalar(0.85).add(new THREE.Vector3(0, 0.25, 0)).addScaledVector(MOON_DIR, 0.35).normalize();
   }
-  placeMoon(false);
+  placeMoon(false, 1.6);
   aimMoon();
   moon.moon.scale.setScalar(MOON_R);
   moon.halo.scale.setScalar(MOON_R * 5);
@@ -1574,15 +1593,15 @@ export function start(canvas: HTMLCanvasElement, opts: { still: boolean; onFirst
     if (!w || !h) return;
     portrait = h > w;
     camera.aspect = w / h;
-    camera.fov = portrait ? 46 : 40;
+    camera.fov = portrait ? 46 : 44;
     camera.updateProjectionMatrix();
-    // standing at the ring's near edge, a little above it so it reads as a circle on the ground
+    // up above the ring's near edge, looking down on it so it reads as a circle on the ground
     // (portrait: further back, so the trumpets and the giant frame the beam from either edge)
-    shift = portrait ? 0 : -Math.max(2.2, 3.7 - 0.9 * (w / h)); // on squarer screens the title reaches further right
-    dist = portrait ? 21 : 12.5;
-    camY = portrait ? 3.2 : 3.6; tgtY = portrait ? 2.2 : 1.9;
+    shift = portrait ? 0 : -Math.max(4.6, 7 - 1.45 * (w / h)); // on squarer screens the title reaches further right
+    dist = portrait ? 24 : 16;
+    camY = portrait ? 7.5 : 6.5; tgtY = portrait ? 0.6 : 1.6;
     if (debug.view) { ({ shift = shift, dist = dist, camY = camY, tgtY = tgtY } = debug.view); camera.fov = debug.view.fov ?? camera.fov; camera.updateProjectionMatrix(); }
-    placeMoon(portrait);
+    placeMoon(portrait, w / h);
     psilos.forEach((c) => c.place(portrait));
     renderer.setPixelRatio(pr);
     renderer.setSize(w, h, false);
